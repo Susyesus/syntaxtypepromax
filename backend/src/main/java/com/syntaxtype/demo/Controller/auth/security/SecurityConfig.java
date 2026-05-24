@@ -50,11 +50,17 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/api/auth/**").permitAll()      // public login/register
-                        .requestMatchers("/api/**").permitAll()        // temporarily accessible to any logged-in user
-                        .anyRequest().permitAll()                         // static files, root page, docs, etc.
-                );
-               // .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                        // Public endpoints
+                        .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/register/student").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/leaderboards/global/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/leaderboards/game/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/leaderboards/user/**").permitAll()
+                        // Everything else under /api requires authentication
+                        .requestMatchers("/api/**").authenticated()
+                        // Static files, root page, etc.
+                        .anyRequest().permitAll()
+                )
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

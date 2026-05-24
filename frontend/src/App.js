@@ -1,10 +1,18 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 
 import Navbar from './components/Navbar';
 import ProtectedRoute from './components/ProtectedRoute';
 import PublicOnlyRoute from './components/PublicOnlyRoute';
 import NotFoundRedirect from './components/NotFoundRedirect';
+import { getAuthToken } from './utils/AuthUtils';
+
+import LandingPage from './pages/LandingPage';
+
+const RootRedirect = () => {
+  if (getAuthToken()) return <Navigate to="/dashboard" replace />;
+  return <LandingPage />;
+};
 
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
@@ -17,6 +25,8 @@ import TeacherSetupAccountPage from './pages/TeacherSetupAccountPage';
 
 import TypingTest from './pages/TypingTest';
 import InstructorModule from './pages/InstructorModule';
+import SyntaxSaverEditor from './pages/SyntaxSaverEditor';
+import TranslationTerminal from './pages/TranslationTerminal';
 import FallingTypingTest from './pages/FallingTypingTest';
 import ChallengePage from './pages/ChallengePage';
 import CreateLessonModule from './pages/CreateLessonModule';
@@ -44,6 +54,9 @@ const App = () => {
       <Navbar />
 
       <Routes>
+        {/* Root: redirect based on auth state */}
+        <Route path="/" element={<RootRedirect />} />
+
         {/* Public-only routes */}
         <Route
           path="/login"
@@ -113,6 +126,22 @@ const App = () => {
           element={
             <ProtectedRoute allowedRoles={['TEACHER', 'ADMIN']}>
               <InstructorModule />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/syntax-saver/edit"
+          element={
+            <ProtectedRoute allowedRoles={['TEACHER', 'ADMIN']}>
+              <SyntaxSaverEditor />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/translation-terminal"
+          element={
+            <ProtectedRoute allowedRoles={['STUDENT', 'TEACHER', 'ADMIN']}>
+              <TranslationTerminal />
             </ProtectedRoute>
           }
         />

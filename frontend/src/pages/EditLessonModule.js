@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Editor } from '@tinymce/tinymce-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { API_BASE } from '../utils/api';
+import { authFetch } from '../utils/authFetch';
 
 const EditLessonModule = () => {
   const { id } = useParams();
@@ -12,7 +13,7 @@ const EditLessonModule = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/lessons/${id}`)
+    authFetch(`${API_BASE}/api/lessons/${id}`)
       .then((res) => {
         if (!res.ok) throw new Error('Lesson not found');
         return res.json();
@@ -36,7 +37,7 @@ const EditLessonModule = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch(`${API_BASE}/api/lessons/${id}`, {
+      const response = await authFetch(`${API_BASE}/api/lessons/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, content }),

@@ -45,13 +45,14 @@ public class GalaxyChallengeService {
         List<GalaxyChallengeDTO.QuestionDTO> questionDTOs = challenge.getQuestions().stream()
                 .map(question -> {
                     GalaxyChallengeDTO.QuestionDTO qdto = new GalaxyChallengeDTO.QuestionDTO();
+                    qdto.setId(question.getId());
                     qdto.setQuestion(question.getQuestion());
                     qdto.setType(question.getType());
 
                     List<GalaxyChallengeDTO.ChoiceDTO> choiceDTOs = question.getChoices().stream()
                             .map(choice -> new GalaxyChallengeDTO.ChoiceDTO(
                                     choice.getChoice(),
-                                    null // Exclude isCorrect
+                                    null // Exclude isCorrect (stripped by @JsonInclude(NON_NULL))
                             ))
                             .collect(Collectors.toList());
                     qdto.setChoices(choiceDTOs);

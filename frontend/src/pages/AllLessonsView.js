@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import '../css/AllLessonsView.css';
 import { API_BASE } from '../utils/api';
+import { authFetch } from '../utils/authFetch';
 
 const AllLessonsView = () => {
   const navigate = useNavigate(); // ✅ Fixed: useNavigate was not initialized
@@ -16,7 +17,7 @@ const AllLessonsView = () => {
   useEffect(() => {
     const fetchLessons = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/lessons`);
+        const res = await authFetch(`${API_BASE}/api/lessons`);
         const data = await res.json();
         setLessons(data);
       } catch (err) {

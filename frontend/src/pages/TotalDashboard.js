@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import '../css/TotalDashboard.css';
 import { API_BASE } from '../utils/api';
+import { authFetch } from '../utils/authFetch';
 
 const TotalDashboard = () => {
   const [scores, setScores] = useState([]);
@@ -10,7 +11,7 @@ const TotalDashboard = () => {
   const [lowestWPM, setLowestWPM] = useState(0);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/scores`)
+    authFetch(`${API_BASE}/api/scores`)
       .then(res => res.json())
       .then(data => {
         // ✅ Filter only "normal" scores

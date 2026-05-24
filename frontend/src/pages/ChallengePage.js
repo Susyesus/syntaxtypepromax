@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import '../css/InstructorModule.css'; // Reuse styles
 import { API_BASE } from '../utils/api';
+import { authFetch } from '../utils/authFetch';
  
 export default function ChallengePage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -22,11 +23,11 @@ export default function ChallengePage() {
     const fetchChallenges = async () => {
       try {
         // Fetch normal challenges (Paragraph type)
-        const normalResponse = await fetch(`${API_BASE}/api/challenges`);
+        const normalResponse = await authFetch(`${API_BASE}/api/challenges`);
         const normalData = await normalResponse.json();
  
         // Fetch falling challenges (List of words)
-        const fallingResponse = await fetch(`${API_BASE}/api/challenges/falling`);
+        const fallingResponse = await authFetch(`${API_BASE}/api/challenges/falling`);
         const fallingData = await fallingResponse.json();
  
         // Set challenges into separate states
@@ -68,7 +69,7 @@ export default function ChallengePage() {
         ? `${API_BASE}/api/challenges/${challengeId}`
         : `${API_BASE}/api/challenges/falling/${challengeId}`;
 
-      const response = await fetch(url, {
+      const response = await authFetch(url, {
         method: 'DELETE',
       });
 
@@ -307,7 +308,7 @@ function NormalTypingChallengeForm({ selectedChallenge, onSaved }) {
         ? `${API_BASE}/api/challenges/${challengeId}`
         : `${API_BASE}/api/challenges`;
 
-      const response = await fetch(url, {
+      const response = await authFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...selectedChallenge, paragraph }),
@@ -366,7 +367,7 @@ function FallingTypingChallengeForm({ selectedChallenge, onSaved,fallingSpeed,
           ? `${API_BASE}/api/challenges/${challengeId}`
           : `${API_BASE}/api/challenges/falling`;
 
-        const response = await fetch(url, {
+        const response = await authFetch(url, {
           method,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -463,7 +464,7 @@ function GalaxyTypingChallengeForm({ onSaved }) {
     const wordsArray = galaxyWords.split(',').map(word => word.trim());
  
     try {
-      const response = await fetch(`${API_BASE}/api/challenges/galaxy`, {
+      const response = await authFetch(`${API_BASE}/api/challenges/galaxy`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ words: wordsArray }),
@@ -591,7 +592,7 @@ const handleAddOption = () => {
     };
  
     try {
-      const response = await fetch(`${API_BASE}/api/quiz`, {
+      const response = await authFetch(`${API_BASE}/api/quiz`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(quizData),
@@ -788,7 +789,7 @@ function AdvancedFallingTypingChallengeForm({
             ? `${API_BASE}/api/challenges/falling/advanced/${challengeId}`
             : `${API_BASE}/api/challenges/falling/advanced`;
 
-      const response = await fetch(url, {
+      const response = await authFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

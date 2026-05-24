@@ -4,12 +4,10 @@ import com.syntaxtype.demo.DTO.lessons.ScoreDTO;
 import com.syntaxtype.demo.DTO.statistics.LeaderboardUpdateResult;
 import com.syntaxtype.demo.DTO.statistics.ScoreSubmissionRequest;
 import com.syntaxtype.demo.Entity.Enums.Category;
-import com.syntaxtype.demo.Repository.lessons.ScoreRepository;
 import com.syntaxtype.demo.Controller.auth.security.CustomUserDetails;
-import com.syntaxtype.demo.Service.lessons.ChallengeService;
 import com.syntaxtype.demo.Service.lessons.ScoreService;
 import com.syntaxtype.demo.Service.statistics.LeaderboardService;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -26,7 +24,6 @@ public class ScoreController {
 
     private final ScoreService scoreService;
     private final LeaderboardService leaderboardService;
-    private ScoreRepository scoreRepository;
 
     public ScoreController(ScoreService scoreService, LeaderboardService leaderboardService) {
         this.scoreService = scoreService;
@@ -78,6 +75,7 @@ public class ScoreController {
      */
     @PostMapping("/{category}")
     @PreAuthorize("hasAnyRole('ADMIN','TEACHER','STUDENT','USER')")
+    @CacheEvict(value = "leaderboard", allEntries = true)
     public ResponseEntity<LeaderboardUpdateResult> submitScore(
             @PathVariable String category,
             @RequestBody ScoreSubmissionRequest request,
