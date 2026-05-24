@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import '../css/InstructorModule.css';
 import { API_BASE } from '../utils/api';
+import { authFetch } from '../utils/authFetch';
 
 export default function InstructorModule() {
   const navigate = useNavigate();
@@ -20,7 +21,7 @@ export default function InstructorModule() {
   const [editedTitle, setEditedTitle] = useState('');
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/lessons`)
+    authFetch(`${API_BASE}/api/lessons`)
       .then((res) => res.json())
       .then((data) => {
         setLessons(data);
@@ -44,7 +45,7 @@ export default function InstructorModule() {
       content: editedContent
     };
 
-    const response = await fetch(`${API_BASE}/api/lessons/${lessonId}`, {
+    const response = await authFetch(`${API_BASE}/api/lessons/${lessonId}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -85,7 +86,7 @@ export default function InstructorModule() {
   };
 
   try {
-    const response = await fetch(`${API_BASE}/api/lessons`, {
+    const response = await authFetch(`${API_BASE}/api/lessons`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newLessonObject),
@@ -106,7 +107,7 @@ export default function InstructorModule() {
 
   const handleDeleteLesson = async (id) => {
     try {
-      const response = await fetch(`${API_BASE}/api/lessons/${id}`, { method: 'DELETE' });
+      const response = await authFetch(`${API_BASE}/api/lessons/${id}`, { method: 'DELETE' });
       if (response.ok) {
         setLessons(lessons.filter((lesson) => lesson.lessonId !== id));
         alert('Lesson deleted successfully');
@@ -169,6 +170,12 @@ export default function InstructorModule() {
         onClick={() => navigate('/lesson')}
       >
         Create Lesson
+      </button>
+      <button
+        className={`tab-button ${activeTab === 'syntaxSaver' ? 'active' : ''}`}
+        onClick={() => navigate('/syntax-saver/edit')}
+      >
+        Syntax Saver
       </button>
       <button
         className={`tab-button ${activeTab === 'rewards' ? 'active' : ''}`}

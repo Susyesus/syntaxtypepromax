@@ -1,380 +1,1065 @@
-import React, { useState, useEffect, useRef } from "react";
-import '../css/FallingTypingTest.css';
-import { API_BASE } from '../utils/api';
-import { useScoreSubmission } from '../hooks/useScoreSubmission';
-import CircularProgress from "@mui/material/CircularProgress";
-import Button from "@mui/material/Button";
-import Snackbar from "@mui/material/Snackbar";
-import Alert from "@mui/material/Alert";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import { API_BASE } from "../utils/api";
+import { authFetch } from "../utils/authFetch";
+import { useScoreSubmission } from "../hooks/useScoreSubmission";
+import {
+    Box,
+    Card,
+    CardContent,
+    Stack,
+    Typography,
+    Button,
+    Chip,
+    IconButton,
+    CircularProgress,
+    Snackbar,
+    Alert,
+    Tooltip,
+    useTheme,
+} from "@mui/material";
+import FavoriteIcon from "@mui/icons-material/Favorite";
+import FavoriteBorderIcon from "@mui/icons-material/FavoriteBorder";
+import PauseIcon from "@mui/icons-material/Pause";
+import PlayArrowIcon from "@mui/icons-material/PlayArrow";
+import RestartAltIcon from "@mui/icons-material/RestartAlt";
+import LocalFireDepartmentIcon from "@mui/icons-material/LocalFireDepartment";
+import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
+import BoltIcon from "@mui/icons-material/Bolt";
+import CenterFocusStrongIcon from "@mui/icons-material/CenterFocusStrong";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
 
-const GAME_AREA_HEIGHT = 600;
+const gradientText = {
+    background: "linear-gradient(90deg, #C8456D 0%, #E78AAC 50%, #FFC700 100%)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+    backgroundClip: "text",
+    display: "inline-block",
+};
+
+const GAME_HEIGHT_BASE = 600; // baseline; CSS clamp scales it
+const BASE_FALL_RATE = 7; // % per second at speed=1
+const PB_PREFIX = "fall:best:";
+
+const loadPB = (id) => {
+    try {
+        const raw = localStorage.getItem(`${PB_PREFIX}${id}`);
+        return raw ? JSON.parse(raw) : null;
+    } catch {
+        return null;
+    }
+};
+const savePB = (id, stats) => {
+    try {
+        localStorage.setItem(`${PB_PREFIX}${id}`, JSON.stringify(stats));
+    } catch {}
+};
+
+const streakMultiplier = (streak) => 1 + Math.floor(streak / 5); // 1x → 2x at 5 → 3x at 10 …
+const basePointsPerWord = 10;
 
 const FallingTypingTest = () => {
-  const [gameDuration, setGameDuration] = useState(60); // fallback duration first
-  const [timeLeft, setTimeLeft] = useState(60); // initialize with 60; will sync with gameDuration later
-  const [availableWords, setAvailableWords] = useState([]);
-  const [fallingWords, setFallingWords] = useState([]);
-  const [currentInput, setCurrentInput] = useState("");
-  const [activeWordId, setActiveWordId] = useState(null);
-  const [score, setScore] = useState(0);
-    const latestScoreRef = useRef(score);
-  const [isGameOver, setIsGameOver] = useState(false);
-  const [lives, setLives] = useState(null);
-const [useLives, setUseLives] = useState(false);
-  const [speed, setSpeed] = useState(1);
-  
-  // Leaderboard submission state
-  const [showSubmitButton, setShowSubmitButton] = useState(false);
-  const { submitScore, isSubmitting, submitMessage, submitSuccess, snackbarOpen, setSnackbarOpen } = useScoreSubmission();
-  const [gameWpm, setGameWpm] = useState(0);
-  const [gameAccuracy, setGameAccuracy] = useState(0);
-  const [correctChars, setCorrectChars] = useState(0);
-  const [totalChars, setTotalChars] = useState(0);
+    const theme = useTheme();
+    const isDark = theme.palette.mode === "dark";
+    const navigate = useNavigate();
 
-  const wordIdCounter = useRef(0);
-  const fallingWordsRef = useRef([]);
+    // Top-level view states: 'picker' | 'playing' | 'gameover'
+    const [view, setView] = useState("picker");
+    const [availableChallenges, setAvailableChallenges] = useState([]);
+    const [challengesLoading, setChallengesLoading] = useState(true);
+    const [challengesError, setChallengesError] = useState(null);
+    const [selectedChallenge, setSelectedChallenge] = useState(null);
+    const [personalBest, setPersonalBest] = useState(null);
 
-  const fetchChallengeById = async (id) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/challenges/falling/${id}`);
-      const challenge = await res.json();
-      if (challenge && challenge.words?.length > 0) {
-       setAvailableWords([
-  ...challenge.words.map(w => ({ text: w.trim(), isCorrect: true })),
-  ...(challenge.wrongWords || []).map(w => ({ text: w.trim(), isCorrect: false }))
-]);
-  
-        setGameDuration(challenge.testTimer || challenge.duration || 60);
-        setTimeLeft(challenge.testTimer || challenge.duration || 60);
-        setSpeed(challenge.speed || 1);
-  
-        if (challenge.maxLives && challenge.maxLives > 0) {
-          setUseLives(true);
-          setLives(challenge.maxLives);
-        } else {
-          setUseLives(false);
-          setLives(null);
+    // Challenge config
+    const [gameDuration, setGameDuration] = useState(60);
+    const [speed, setSpeed] = useState(1);
+    const [useLives, setUseLives] = useState(false);
+    const [maxLives, setMaxLives] = useState(3);
+
+    // Active game state
+    const [timeLeft, setTimeLeft] = useState(60);
+    const [score, setScore] = useState(0);
+    const [lives, setLives] = useState(3);
+    const [streak, setStreak] = useState(0);
+    const [bestStreak, setBestStreak] = useState(0);
+    const [isPaused, setIsPaused] = useState(false);
+    const [fallingWords, setFallingWords] = useState([]);
+    const [popups, setPopups] = useState([]);
+    const [currentInput, setCurrentInput] = useState("");
+    const [activeWordId, setActiveWordId] = useState(null);
+    const [flash, setFlash] = useState(null); // { color, expiresAt }
+
+    // Final stats
+    const [finalStats, setFinalStats] = useState(null);
+    const [showSubmitButton, setShowSubmitButton] = useState(false);
+
+    // Refs (animation + counters)
+    const fallingWordsRef = useRef([]);
+    const wordIdCounter = useRef(0);
+    const popupIdCounter = useRef(0);
+    const lastSpawnRef = useRef(0);
+    const lastFrameRef = useRef(0);
+    const animationRef = useRef(null);
+    const gameStartedAtRef = useRef(0);
+    const pausedAccumRef = useRef(0);
+    const pauseStartRef = useRef(0);
+    const correctCharsRef = useRef(0);
+    const totalCharsRef = useRef(0);
+    const wordsCaughtRef = useRef(0);
+    const wordsMissedRef = useRef(0);
+    const wrongWordsTypedRef = useRef(0);
+    const streakRef = useRef(0);
+    const bestStreakRef = useRef(0);
+    const livesRef = useRef(3);
+    const useLivesRef = useRef(false);
+    const isPausedRef = useRef(false);
+    const wordPoolsRef = useRef({ correct: [], wrong: [] });
+    const speedRef = useRef(1);
+    const inputRef = useRef("");
+    const hiddenInputRef = useRef(null);
+    const gameOverRef = useRef(false);
+    const scoreRef = useRef(0);
+    const gameDurationRef = useRef(60);
+    const selectedChallengeRef = useRef(null);
+
+    // Keep refs in sync with state used by endGame.
+    useEffect(() => { scoreRef.current = score; }, [score]);
+    useEffect(() => { gameDurationRef.current = gameDuration; }, [gameDuration]);
+    useEffect(() => { selectedChallengeRef.current = selectedChallenge; }, [selectedChallenge]);
+
+    const { submitScore, isSubmitting, submitMessage, submitSuccess, snackbarOpen, setSnackbarOpen } =
+        useScoreSubmission();
+
+    // ─── Load challenge list ──────────────────────────────────────────────────
+    useEffect(() => {
+        let cancelled = false;
+        const loadList = async () => {
+            setChallengesLoading(true);
+            setChallengesError(null);
+            try {
+                const res = await authFetch(`${API_BASE}/api/challenges/falling`);
+                if (!res.ok) throw new Error(`status ${res.status}`);
+                const data = await res.json();
+                if (!cancelled) {
+                    setAvailableChallenges(Array.isArray(data) ? data : []);
+                }
+            } catch (e) {
+                if (!cancelled) setChallengesError("Couldn't load challenges from server.");
+            } finally {
+                if (!cancelled) setChallengesLoading(false);
+            }
+        };
+        loadList();
+
+        // If a challenge was set in sessionStorage (e.g., from /typingtest mode picker), pre-select it.
+        let stored = null;
+        try {
+            stored = JSON.parse(sessionStorage.getItem("fallingChallenge"));
+        } catch {}
+        if (stored?.challengeId) {
+            loadChallengeById(stored.challengeId);
+            sessionStorage.removeItem("fallingChallenge");
         }
-      }
-    } catch (err) {
-      console.error(`Failed to fetch challenge with ID ${id}:`, err);
-    }
-  };
+        return () => {
+            cancelled = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
-  // Load challenge from sessionStorage on mount
-  useEffect(() => {
-    const challenge = JSON.parse(sessionStorage.getItem("fallingChallenge"));
-    if (challenge) {
-       fetchChallengeById(challenge.challengeId);
-    } else {
-      // fallback fetch from API
-    }
-  }, []);
-useEffect(() => {
-  latestScoreRef.current = score;            
-      }, [score]);
-// Timer countdown
-useEffect(() => {
-  if (isGameOver) {
-    // Calculate WPM and accuracy for the game
-    // Assuming average word length of 5 characters
-    const totalCharsTyped = score * 5;
-    const minutes = gameDuration / 60;
-    const wpm = minutes > 0 ? Math.round(totalCharsTyped / 5 / minutes) : 0;
-    // Calculate accuracy based on tracked keystrokes
-    const accuracy = totalChars > 0 ? Math.round((correctChars / totalChars) * 100) : 100;
-    
-    setGameWpm(wpm);
-    setGameAccuracy(accuracy);
-    
-    // Show submit button instead of auto-submitting
-    setShowSubmitButton(true);
-  }
-},  [isGameOver, score, gameDuration, correctChars, totalChars]);
-
-// Submit score to leaderboard
-const handleSubmitScore = async () => {
-  const payload = {
-    wpm: gameWpm,
-    accuracy: gameAccuracy,
-    score: score
-  };
-  
-  const success = await submitScore('FALLING_WORDS', payload);
-  if (success) {
-    setShowSubmitButton(false);
-  }
-};
-useEffect(() => {
-  if (isGameOver || timeLeft <= 0) return;
-
-  const timer = setInterval(() => {
-    setTimeLeft(prev => {
-      if (prev <= 1) {
-        clearInterval(timer);
-        setIsGameOver(true);
-        return 0;
-      }
-      return prev - 1;
-    });
-  }, 1000);
-
-  return () => clearInterval(timer);
-}, [timeLeft, isGameOver]);
-
-  // Spawning and falling logic
-  useEffect(() => {
-    if (availableWords.length === 0 || isGameOver) return;
-
-    const spawnInterval = setInterval(() => {
-      const wordObj = availableWords[Math.floor(Math.random() * availableWords.length)];
-
-const newWord = {
-  id: wordIdCounter.current++,
-  text: wordObj.text,
-  isCorrect: wordObj.isCorrect,
-  y: 0,
-  x: Math.random() * 80,
-};
-      setFallingWords(prev => {
-        const updated = [...prev, newWord];
-        fallingWordsRef.current = updated;
-        return updated;
-      });
-    }, 2000 / speed); // speed affects spawn rate
-
-    const fallInterval = setInterval(() => {
-      let lostWordsCount = 0;
-
-      const updatedWords = fallingWordsRef.current.reduce((acc, word) => {
-        const newY = word.y + 5 * speed; // speed affects fall rate
-     if (newY > GAME_AREA_HEIGHT) {
-  if (useLives && word.isCorrect) {
-    lostWordsCount += 1; // ✅ ONLY correct words punish
-  }
-  return acc;
-}
-        acc.push({ ...word, y: newY });
-        return acc;
-      }, []);
-
-      setFallingWords(updatedWords);
-      fallingWordsRef.current = updatedWords;
-
-      if (lostWordsCount > 0 && useLives) {
-        setLives(prevLives => {
-          const updatedLives = prevLives - lostWordsCount;
-          if (updatedLives <= 0) {
-            setIsGameOver(true);
-            return 0;
-          }
-          return updatedLives;
-        });
-      }
-    }, 200);
-
-    return () => {
-      clearInterval(spawnInterval);
-      clearInterval(fallInterval);
+    const loadChallengeById = async (id) => {
+        try {
+            const res = await authFetch(`${API_BASE}/api/challenges/falling/${id}`);
+            if (!res.ok) throw new Error();
+            const c = await res.json();
+            startChallenge(c);
+        } catch (e) {
+            setChallengesError("Failed to load that challenge.");
+        }
     };
-  }, [availableWords, isGameOver, useLives, speed]);
 
-const handleRestart = () => {
-    const challenge = JSON.parse(sessionStorage.getItem("fallingChallenge"));
-    setFallingWords([]);
-    fallingWordsRef.current = [];
-    setCurrentInput("");
-    setActiveWordId(null);
-    setScore(0);
-    setIsGameOver(false);
-    setShowSubmitButton(false);
-    setGameWpm(0);
-    setGameAccuracy(0);
-    setCorrectChars(0);
-    setTotalChars(0);
-    wordIdCounter.current = 0;
-  
-    if (challenge?.challengeId) {
-      fetchChallengeById(challenge.challengeId);
-    } else {
-      setAvailableWords([]);
-      setGameDuration(60);
-      setTimeLeft(60);
-      setSpeed(1);
-      setUseLives(false);
-      setLives(null);
-    }
-  };
-  const handleInputChange = (e) => {
-    const value = e.target.value;
-    const prevLength = currentInput.length;
-    setCurrentInput(value);
+    // ─── Start / Reset game ───────────────────────────────────────────────────
+    const startChallenge = (c) => {
+        const dur = c.testTimer || c.duration || 60;
+        const spd = c.speed || 1;
+        const useL = !!(c.maxLives && c.maxLives > 0);
+        const ml = c.maxLives || 3;
 
-    if (value === "") {
-      setActiveWordId(null);
-      return;
-    }
+        setSelectedChallenge(c);
+        setGameDuration(dur);
+        setSpeed(spd);
+        setUseLives(useL);
+        setMaxLives(ml);
+        useLivesRef.current = useL;
+        speedRef.current = spd;
 
-    const match = fallingWordsRef.current.find(word => word.text.startsWith(value));
+        wordPoolsRef.current = {
+            correct: (c.words || []).map((w) => String(w).trim()).filter(Boolean),
+            wrong: (c.wrongWords || []).map((w) => String(w).trim()).filter(Boolean),
+        };
 
-    // Track keystrokes for accuracy
-    if (value.length > prevLength) {
-      const newCharIndex = value.length - 1;
-      const newChar = value[newCharIndex];
-      
-      if (match) {
-        const expectedChar = match.text[newCharIndex];
-        if (newChar === expectedChar) {
-          setCorrectChars(prev => prev + 1);
-        }
-      }
-      setTotalChars(prev => prev + 1);
-    }
+        setPersonalBest(loadPB(c.challengeId || c.id));
+        resetGameState(dur, ml, useL);
+        setView("playing");
+        setTimeout(() => hiddenInputRef.current?.focus(), 50);
+    };
 
-    if (match) {
-      setActiveWordId(match.id);
-      if (value === match.text && match.isCorrect) {
-        setFallingWords(prev => {
-          const updated = prev.filter(word => word.id !== match.id);
-          fallingWordsRef.current = updated;
-          return updated;
-        });
-        setScore(prev => prev + 1);
+    const resetGameState = (dur, ml, useL) => {
+        setTimeLeft(dur);
+        setScore(0);
+        setLives(ml);
+        setStreak(0);
+        setBestStreak(0);
+        setIsPaused(false);
+        setFallingWords([]);
+        setPopups([]);
         setCurrentInput("");
         setActiveWordId(null);
-      }
-    } else {
-      setActiveWordId(null);
-    }
-  };
+        setFlash(null);
+        setFinalStats(null);
+        setShowSubmitButton(false);
 
-  const renderWord = (word) => {
- if (word.id !== activeWordId) return word.text;
-    return[...word.text].map((char, i) => (
-  <span key={i} style={{ color: currentInput[i] === char ? "lime" : "red" }}>
-    {char}
-  </span>
-))
-  };
+        fallingWordsRef.current = [];
+        wordIdCounter.current = 0;
+        popupIdCounter.current = 0;
+        lastSpawnRef.current = 0;
+        lastFrameRef.current = 0;
+        gameStartedAtRef.current = performance.now();
+        pausedAccumRef.current = 0;
+        pauseStartRef.current = 0;
+        correctCharsRef.current = 0;
+        totalCharsRef.current = 0;
+        wordsCaughtRef.current = 0;
+        wordsMissedRef.current = 0;
+        wrongWordsTypedRef.current = 0;
+        streakRef.current = 0;
+        bestStreakRef.current = 0;
+        livesRef.current = useL ? ml : Infinity;
+        isPausedRef.current = false;
+        inputRef.current = "";
+        gameOverRef.current = false;
+    };
 
-return (
-    <>
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={5000}
-        onClose={() => setSnackbarOpen(false)}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-      >
-        <Alert
-          onClose={() => setSnackbarOpen(false)}
-          severity={submitSuccess ? "success" : "error"}
-          sx={{ width: "100%" }}
-        >
-          {submitMessage}
-        </Alert>
-      </Snackbar>
-      
-      <div style={{ padding: "2rem" }}>
-      <h2>Falling Typing Test</h2>
-      <p>Score: {score} | Time Left: {timeLeft}s {useLives && `| Lives: ${lives}`}</p>
+    // ─── Game over ────────────────────────────────────────────────────────────
+    const endGame = useCallback(() => {
+        if (gameOverRef.current) return;
+        gameOverRef.current = true;
+        if (animationRef.current) cancelAnimationFrame(animationRef.current);
 
-      <div
-        className="game-area"
-        style={{
-          backgroundImage: "url('/images/background.jpeg')",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-          position: 'relative',
-          height: `${GAME_AREA_HEIGHT}px`,
-          overflow: 'hidden',
-          border: '2px solid #ccc'
-        }}
-      >
-        {fallingWords.map(word => (
-          <div
-            key={word.id}
-            className="falling-word"
-            style={{
-              position: 'absolute',
-              top: `${word.y}px`,
-              left: `${word.x}%`,
-              color: 'yellow',
-              fontSize: '18px'
-            }}
-          >
-            {renderWord(word)}
-          </div>
-        ))}
+        const totalCorrect = wordsCaughtRef.current;
+        const elapsedSec = Math.max(1, gameDurationRef.current);
+        const charsTyped = totalCharsRef.current;
+        const wpm = Math.round((charsTyped / 5) / (elapsedSec / 60));
+        const accuracy = totalCharsRef.current > 0
+            ? Math.round((correctCharsRef.current / totalCharsRef.current) * 100)
+            : 100;
+        const stats = {
+            score: scoreRef.current,
+            wpm,
+            accuracy,
+            wordsCaught: totalCorrect,
+            wordsMissed: wordsMissedRef.current,
+            wrongTyped: wrongWordsTypedRef.current,
+            bestStreak: bestStreakRef.current,
+        };
 
-{isGameOver && (
-          <div
-            style={{
-              position: 'absolute',
-              top: '40%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              background: 'rgba(0,0,0,0.85)',
-              padding: '30px',
-              borderRadius: '15px',
-              color: 'white',
-              fontSize: '24px',
-              textAlign: 'center',
-              minWidth: '300px'
-            }}
-          >
-            <p style={{ marginBottom: '10px' }}>Game Over!</p>
-            <p style={{ fontSize: '18px', color: '#aaa', marginBottom: '20px' }}>
-              Score: {score} | WPM: {gameWpm} | Accuracy: {gameAccuracy}%
-            </p>
-            
-            {showSubmitButton && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={handleSubmitScore}
-                  disabled={isSubmitting}
-                  startIcon={isSubmitting ? <CircularProgress size={20} color="inherit" /> : null}
-                  sx={{ fontSize: '16px', padding: '12px 24px' }}
-                >
-                  {isSubmitting ? "Submitting..." : "Submit to Leaderboard"}
-                </Button>
-                
-                {!isSubmitting && (
-                  <Button
-                    variant="outlined"
-                    color="secondary"
-                    onClick={handleRestart}
-                    sx={{ fontSize: '14px', padding: '8px 16px' }}
-                  >
-                    Play Again
-                  </Button>
+        const c = selectedChallengeRef.current;
+        const challengeKey = c?.challengeId || c?.id;
+        if (challengeKey) {
+            const prev = loadPB(challengeKey);
+            if (!prev || stats.score > prev.score) {
+                const newPB = { ...stats, at: Date.now() };
+                savePB(challengeKey, newPB);
+                setPersonalBest(newPB);
+                stats.isNewBest = true;
+            }
+        }
+        setFinalStats(stats);
+        setShowSubmitButton(true);
+        setView("gameover");
+    }, []);
+
+    // ─── Spawn logic ──────────────────────────────────────────────────────────
+    const trySpawn = () => {
+        const pools = wordPoolsRef.current;
+        const totalPool = pools.correct.length + pools.wrong.length;
+        if (totalPool === 0) return;
+
+        // Mix wrong words if available (~25% chance per spawn).
+        const useWrong = pools.wrong.length > 0 && Math.random() < 0.25;
+        const pool = useWrong ? pools.wrong : pools.correct;
+        if (pool.length === 0) return;
+        const text = pool[Math.floor(Math.random() * pool.length)];
+
+        // Avoid overlap: pick an x band not occupied near the top.
+        let x;
+        for (let attempt = 0; attempt < 6; attempt++) {
+            const candidate = Math.random() * 80 + 5; // 5–85% so words don't clip
+            const tooClose = fallingWordsRef.current.some(
+                (w) => w.y < 18 && Math.abs(w.x - candidate) < 14
+            );
+            if (!tooClose) {
+                x = candidate;
+                break;
+            }
+        }
+        if (x === undefined) return; // skip this spawn rather than overlap
+
+        const newWord = {
+            id: wordIdCounter.current++,
+            text,
+            x,
+            y: 0,
+            isCorrect: !useWrong,
+        };
+        fallingWordsRef.current = [...fallingWordsRef.current, newWord];
+    };
+
+    // ─── Catch / penalize ─────────────────────────────────────────────────────
+    const catchWord = (word) => {
+        if (word.isCorrect) {
+            // Score with streak multiplier
+            const mult = streakMultiplier(streakRef.current);
+            const points = basePointsPerWord * mult;
+            setScore((s) => s + points);
+            wordsCaughtRef.current += 1;
+            streakRef.current += 1;
+            setStreak(streakRef.current);
+            if (streakRef.current > bestStreakRef.current) {
+                bestStreakRef.current = streakRef.current;
+                setBestStreak(bestStreakRef.current);
+            }
+            // Popup
+            pushPopup({
+                x: word.x,
+                y: word.y,
+                text: `+${points}${mult > 1 ? ` ×${mult}` : ""}`,
+                color: "#7BE093",
+            });
+            triggerFlash("#7BE093");
+        } else {
+            // Wrong word typed → penalty
+            wrongWordsTypedRef.current += 1;
+            streakRef.current = 0;
+            setStreak(0);
+            if (useLivesRef.current) {
+                livesRef.current -= 1;
+                setLives(livesRef.current);
+                if (livesRef.current <= 0) {
+                    removeWord(word.id);
+                    endGame();
+                    return;
+                }
+            }
+            pushPopup({ x: word.x, y: word.y, text: "TRAP!", color: "#FF6B6B" });
+            triggerFlash("#FF6B6B");
+        }
+        removeWord(word.id);
+    };
+
+    const removeWord = (id) => {
+        fallingWordsRef.current = fallingWordsRef.current.filter((w) => w.id !== id);
+    };
+
+    const pushPopup = ({ x, y, text, color }) => {
+        const p = {
+            id: popupIdCounter.current++,
+            x,
+            y,
+            text,
+            color,
+            createdAt: performance.now(),
+        };
+        setPopups((arr) => [...arr, p]);
+        setTimeout(() => {
+            setPopups((arr) => arr.filter((pp) => pp.id !== p.id));
+        }, 900);
+    };
+
+    const triggerFlash = (color) => {
+        setFlash({ color, expiresAt: performance.now() + 250 });
+    };
+
+    // ─── Input handling ───────────────────────────────────────────────────────
+    const handleInputChange = (e) => {
+        if (gameOverRef.current || isPausedRef.current) return;
+        const value = e.target.value;
+        const prevLen = inputRef.current.length;
+        inputRef.current = value;
+        setCurrentInput(value);
+
+        // Track keystrokes (added chars).
+        if (value.length > prevLen) {
+            const newChar = value[value.length - 1];
+            totalCharsRef.current += 1;
+
+            // Find a falling word whose text starts with the current input.
+            const match = fallingWordsRef.current.find((w) => w.text.startsWith(value));
+            if (match) {
+                const expectedChar = match.text[value.length - 1];
+                if (newChar === expectedChar) correctCharsRef.current += 1;
+                setActiveWordId(match.id);
+                if (value === match.text) {
+                    catchWord(match);
+                    inputRef.current = "";
+                    setCurrentInput("");
+                    setActiveWordId(null);
+                }
+            } else {
+                setActiveWordId(null);
+            }
+        } else if (value === "") {
+            setActiveWordId(null);
+        }
+    };
+
+    const handleKeyDown = (e) => {
+        if ((e.ctrlKey || e.metaKey || e.altKey) && e.key.length === 1) e.preventDefault();
+        if (e.key === "Tab") e.preventDefault();
+        if (e.key === "Escape") {
+            e.preventDefault();
+            setIsPaused((p) => {
+                const next = !p;
+                isPausedRef.current = next;
+                if (next) pauseStartRef.current = performance.now();
+                else if (pauseStartRef.current) {
+                    pausedAccumRef.current += performance.now() - pauseStartRef.current;
+                    pauseStartRef.current = 0;
+                }
+                return next;
+            });
+        }
+    };
+
+    const togglePause = () => {
+        setIsPaused((p) => {
+            const next = !p;
+            isPausedRef.current = next;
+            if (next) pauseStartRef.current = performance.now();
+            else if (pauseStartRef.current) {
+                pausedAccumRef.current += performance.now() - pauseStartRef.current;
+                pauseStartRef.current = 0;
+            }
+            return next;
+        });
+        hiddenInputRef.current?.focus();
+    };
+
+    const handleRestart = () => {
+        if (!selectedChallenge) return;
+        startChallenge(selectedChallenge);
+    };
+
+    const handleBackToPicker = () => {
+        if (animationRef.current) cancelAnimationFrame(animationRef.current);
+        setView("picker");
+        setSelectedChallenge(null);
+    };
+
+    // ─── Animation loop ───────────────────────────────────────────────────────
+    useEffect(() => {
+        if (view !== "playing") return;
+        lastFrameRef.current = performance.now();
+        lastSpawnRef.current = performance.now();
+
+        const loop = (now) => {
+            if (gameOverRef.current) return;
+            const dt = Math.min((now - lastFrameRef.current) / 1000, 0.1);
+            lastFrameRef.current = now;
+
+            if (!isPausedRef.current) {
+                // Spawn
+                const spawnIntervalMs = 1800 / speedRef.current;
+                if (now - lastSpawnRef.current > spawnIntervalMs) {
+                    trySpawn();
+                    lastSpawnRef.current = now;
+                }
+
+                // Fall + cleanup
+                const fallRate = BASE_FALL_RATE * speedRef.current; // % per second
+                const updated = [];
+                let livesLostThisFrame = 0;
+                for (const w of fallingWordsRef.current) {
+                    const newY = w.y + fallRate * dt;
+                    if (newY > 100) {
+                        // Missed
+                        if (w.isCorrect) {
+                            wordsMissedRef.current += 1;
+                            streakRef.current = 0;
+                            if (useLivesRef.current) {
+                                livesLostThisFrame += 1;
+                            }
+                        }
+                        // wrong word dropped off — that's fine
+                        continue;
+                    }
+                    updated.push({ ...w, y: newY });
+                }
+                fallingWordsRef.current = updated;
+                setFallingWords(updated);
+                if (livesLostThisFrame > 0) {
+                    livesRef.current -= livesLostThisFrame;
+                    setLives(livesRef.current);
+                    setStreak(0);
+                    triggerFlash("#FF6B6B");
+                    if (livesRef.current <= 0) {
+                        endGame();
+                        return;
+                    }
+                }
+            }
+
+            animationRef.current = requestAnimationFrame(loop);
+        };
+        animationRef.current = requestAnimationFrame(loop);
+
+        return () => {
+            if (animationRef.current) cancelAnimationFrame(animationRef.current);
+        };
+    }, [view, endGame]);
+
+    // ─── Timer countdown (real-time, pause-aware) ────────────────────────────
+    useEffect(() => {
+        if (view !== "playing") return;
+        const interval = setInterval(() => {
+            if (gameOverRef.current) return;
+            if (isPausedRef.current) return;
+            const elapsedMs = performance.now() - gameStartedAtRef.current - pausedAccumRef.current;
+            const remaining = Math.max(0, Math.ceil(gameDurationRef.current - elapsedMs / 1000));
+            setTimeLeft(remaining);
+            if (remaining <= 0) {
+                endGame();
+            }
+        }, 200);
+        return () => clearInterval(interval);
+    }, [view, endGame]);
+
+    // ─── Flash decay ──────────────────────────────────────────────────────────
+    useEffect(() => {
+        if (!flash) return;
+        const t = setTimeout(() => setFlash(null), 250);
+        return () => clearTimeout(t);
+    }, [flash]);
+
+    // ─── Submit score ─────────────────────────────────────────────────────────
+    const handleSubmitScore = async () => {
+        if (!finalStats) return;
+        const ok = await submitScore("FALLING_WORDS", {
+            wpm: finalStats.wpm,
+            accuracy: finalStats.accuracy,
+            score: finalStats.score,
+        });
+        if (ok) setShowSubmitButton(false);
+    };
+
+    // ─── Render: word in game area ────────────────────────────────────────────
+    const renderWord = (w) => {
+        const isActive = w.id === activeWordId;
+        const baseColor = w.isCorrect ? "#FFC700" : "#FF6B6B";
+        return (
+            <Box
+                key={w.id}
+                sx={{
+                    position: "absolute",
+                    left: `${w.x}%`,
+                    top: `${w.y}%`,
+                    transform: "translate(-50%, -50%)",
+                    fontFamily: '"JetBrains Mono", monospace',
+                    fontSize: { xs: "1rem", md: "1.2rem" },
+                    fontWeight: w.isCorrect ? 600 : 800,
+                    color: baseColor,
+                    textShadow: w.isCorrect
+                        ? "0 2px 8px rgba(0,0,0,0.7)"
+                        : "0 0 12px rgba(255, 107, 107, 0.8), 0 2px 6px rgba(0,0,0,0.7)",
+                    whiteSpace: "nowrap",
+                    pointerEvents: "none",
+                    transition: "transform 80ms",
+                    ...(isActive && {
+                        bgcolor: "rgba(200,69,109,0.25)",
+                        border: "2px solid #C8456D",
+                        borderRadius: 1,
+                        px: 0.75,
+                        py: 0.25,
+                    }),
+                }}
+            >
+                {isActive
+                    ? w.text.split("").map((ch, i) => (
+                          <Box
+                              component="span"
+                              key={i}
+                              sx={{
+                                  color: currentInput[i] === ch ? "#7BE093" : currentInput[i] !== undefined ? "#FF6B6B" : baseColor,
+                              }}
+                          >
+                              {ch}
+                          </Box>
+                      ))
+                    : w.text}
+            </Box>
+        );
+    };
+
+    // ─── Render: picker view ─────────────────────────────────────────────────
+    const renderPicker = () => (
+        <Stack spacing={3}>
+            <Card>
+                <CardContent sx={{ p: { xs: 3, md: 4 } }}>
+                    <Stack spacing={2}>
+                        <Box sx={{ color: "primary.main", display: "flex", alignItems: "center", gap: 1 }}>
+                            <CloudDownloadIcon fontSize="large" />
+                        </Box>
+                        <Typography variant="h4" sx={{ color: "text.primary" }}>
+                            Falling <Box component="span" sx={gradientText}>Code</Box>
+                        </Typography>
+                        <Typography variant="body1" sx={{ color: "text.secondary" }}>
+                            Type the keywords before they hit the ground. Some words are traps — don't type those, or you'll lose a life.
+                        </Typography>
+                    </Stack>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardContent sx={{ p: { xs: 2, md: 3 } }}>
+                    <Typography variant="h6" sx={{ color: "text.primary", mb: 2 }}>
+                        Choose a challenge
+                    </Typography>
+                    {challengesLoading && (
+                        <Box sx={{ textAlign: "center", py: 4 }}>
+                            <CircularProgress color="primary" />
+                        </Box>
+                    )}
+                    {challengesError && <Alert severity="error">{challengesError}</Alert>}
+                    {!challengesLoading && !challengesError && availableChallenges.length === 0 && (
+                        <Typography sx={{ color: "text.secondary", textAlign: "center", py: 4 }}>
+                            No challenges available yet. Ask your teacher to create one.
+                        </Typography>
+                    )}
+                    <Stack spacing={1}>
+                        {availableChallenges.map((c) => {
+                            const id = c.challengeId || c.id;
+                            const pb = loadPB(id);
+                            return (
+                                <Box
+                                    key={id}
+                                    onClick={() => startChallenge(c)}
+                                    sx={{
+                                        p: 2,
+                                        borderRadius: 2,
+                                        border: "1.5px solid",
+                                        borderColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)",
+                                        cursor: "pointer",
+                                        transition: "all 150ms",
+                                        "&:hover": {
+                                            borderColor: "primary.main",
+                                            bgcolor: "rgba(200,69,109,0.06)",
+                                            transform: "translateX(4px)",
+                                        },
+                                    }}
+                                >
+                                    <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
+                                        <Box>
+                                            <Typography sx={{ color: "text.primary", fontWeight: 700 }}>
+                                                {c.title || c.name || `Challenge #${id}`}
+                                            </Typography>
+                                            <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                                                {(c.words?.length || 0)} words · {(c.testTimer || c.duration || 60)}s · speed {c.speed || 1}×
+                                                {c.maxLives ? ` · ${c.maxLives} ❤` : " · no lives"}
+                                            </Typography>
+                                        </Box>
+                                        {pb && (
+                                            <Chip
+                                                icon={<EmojiEventsIcon sx={{ fontSize: 14, color: "#FFC700 !important" }} />}
+                                                label={pb.score}
+                                                size="small"
+                                                sx={{
+                                                    bgcolor: "rgba(255,199,0,0.15)",
+                                                    color: "warning.main",
+                                                    border: "1.5px solid",
+                                                    borderColor: "warning.main",
+                                                    fontWeight: 700,
+                                                }}
+                                            />
+                                        )}
+                                    </Stack>
+                                </Box>
+                            );
+                        })}
+                    </Stack>
+                </CardContent>
+            </Card>
+        </Stack>
+    );
+
+    // ─── Render: playing view ────────────────────────────────────────────────
+    const renderPlaying = () => (
+        <Stack spacing={3}>
+            {/* Top stat bar */}
+            <Box
+                sx={{
+                    display: "grid",
+                    gap: 2,
+                    gridTemplateColumns: { xs: "repeat(3, 1fr)", md: "repeat(5, 1fr)" },
+                }}
+            >
+                <Card>
+                    <CardContent sx={{ p: 1.5, textAlign: "center" }}>
+                        <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 700 }}>Time</Typography>
+                        <Typography variant="h5" sx={{ color: timeLeft <= 10 ? "#FF6B6B" : "#C8456D", lineHeight: 1, mt: 0.5 }}>
+                            {timeLeft}s
+                        </Typography>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardContent sx={{ p: 1.5, textAlign: "center" }}>
+                        <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 700 }}>Score</Typography>
+                        <Typography variant="h5" sx={{ color: "#FFC700", lineHeight: 1, mt: 0.5 }}>{score}</Typography>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardContent sx={{ p: 1.5, textAlign: "center" }}>
+                        <Stack direction="row" alignItems="center" justifyContent="center" spacing={0.5}>
+                            <LocalFireDepartmentIcon sx={{ color: streak > 0 ? "#FF6B35" : "text.secondary", fontSize: 18 }} />
+                            <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 700 }}>Streak</Typography>
+                        </Stack>
+                        <Typography variant="h5" sx={{ color: streak > 0 ? "#FF6B35" : "text.primary", lineHeight: 1, mt: 0.5 }}>
+                            {streak} {streakMultiplier(streak) > 1 && <Box component="span" sx={{ fontSize: "0.7em", color: "warning.main" }}>×{streakMultiplier(streak)}</Box>}
+                        </Typography>
+                    </CardContent>
+                </Card>
+                {useLives && (
+                    <Card>
+                        <CardContent sx={{ p: 1.5, textAlign: "center" }}>
+                            <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 700 }}>Lives</Typography>
+                            <Stack direction="row" justifyContent="center" spacing={0.25} sx={{ mt: 0.5 }}>
+                                {Array.from({ length: maxLives }, (_, i) =>
+                                    i < lives ? (
+                                        <FavoriteIcon key={i} sx={{ color: "#FF6B6B", fontSize: 22 }} />
+                                    ) : (
+                                        <FavoriteBorderIcon key={i} sx={{ color: "text.secondary", fontSize: 22 }} />
+                                    )
+                                )}
+                            </Stack>
+                        </CardContent>
+                    </Card>
                 )}
-              </div>
-            )}
-            
-            {!showSubmitButton && (
-              <button onClick={handleRestart} style={{ padding: '10px 20px', fontSize: '16px' }}>
-                Play Again
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+                <Card sx={{ display: { xs: useLives ? "none" : "block", md: "block" } }}>
+                    <CardContent sx={{ p: 1.5, textAlign: "center" }}>
+                        <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 700 }}>Best</Typography>
+                        <Typography variant="h5" sx={{ color: "warning.main", lineHeight: 1, mt: 0.5 }}>
+                            {personalBest ? personalBest.score : "—"}
+                        </Typography>
+                    </CardContent>
+                </Card>
+            </Box>
 
-      {!isGameOver && (
-        <input
-          type="text"
-          placeholder="Start typing..."
-          value={currentInput}
-          onChange={handleInputChange}
-          style={{ width: "100%", marginTop: "1rem", padding: "10px", fontSize: "16px" }}
-          autoFocus
-        />
-      )}
-    </div>
-    </>
-  );
+            {/* Game area */}
+            <Box
+                onClick={() => hiddenInputRef.current?.focus()}
+                sx={{
+                    position: "relative",
+                    width: "100%",
+                    height: { xs: 480, md: GAME_HEIGHT_BASE },
+                    overflow: "hidden",
+                    borderRadius: 3,
+                    border: "2px solid",
+                    borderColor: "primary.main",
+                    background: isDark
+                        ? "radial-gradient(ellipse at top, #1A1A2E 0%, #0A0A14 100%)"
+                        : "radial-gradient(ellipse at top, #2A1A3E 0%, #0F0820 100%)",
+                    boxShadow: flash
+                        ? `inset 0 0 60px ${flash.color}66`
+                        : "inset 0 0 40px rgba(0,0,0,0.4)",
+                    transition: "box-shadow 150ms",
+                    cursor: "text",
+                }}
+            >
+                {/* Decorative grid lines */}
+                <Box
+                    sx={{
+                        position: "absolute",
+                        inset: 0,
+                        backgroundImage:
+                            "linear-gradient(rgba(200,69,109,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,199,0,0.04) 1px, transparent 1px)",
+                        backgroundSize: "32px 32px",
+                        pointerEvents: "none",
+                    }}
+                />
+
+                {/* Pause overlay */}
+                {isPaused && (
+                    <Box
+                        sx={{
+                            position: "absolute",
+                            inset: 0,
+                            bgcolor: "rgba(0,0,0,0.75)",
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            zIndex: 10,
+                            gap: 2,
+                        }}
+                    >
+                        <Typography variant="h2" sx={{ color: "#FFC700" }}>
+                            <Box component="span" sx={gradientText}>PAUSED</Box>
+                        </Typography>
+                        <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                            Press Esc or click Resume to continue
+                        </Typography>
+                        <Button variant="contained" color="primary" startIcon={<PlayArrowIcon />} onClick={togglePause}>
+                            Resume
+                        </Button>
+                    </Box>
+                )}
+
+                {/* Falling words */}
+                {fallingWords.map(renderWord)}
+
+                {/* Popups */}
+                {popups.map((p) => (
+                    <Box
+                        key={p.id}
+                        sx={{
+                            position: "absolute",
+                            left: `${p.x}%`,
+                            top: `${p.y}%`,
+                            transform: "translate(-50%, -50%)",
+                            color: p.color,
+                            fontFamily: '"Pixelify Sans", sans-serif',
+                            fontWeight: 800,
+                            fontSize: "1.4rem",
+                            pointerEvents: "none",
+                            textShadow: "0 2px 8px rgba(0,0,0,0.8)",
+                            animation: "fp-rise 900ms ease-out forwards",
+                            "@keyframes fp-rise": {
+                                "0%": { opacity: 1, transform: "translate(-50%, -50%) scale(1)" },
+                                "100%": { opacity: 0, transform: "translate(-50%, -180%) scale(1.3)" },
+                            },
+                        }}
+                    >
+                        {p.text}
+                    </Box>
+                ))}
+            </Box>
+
+            {/* Hidden input */}
+            <textarea
+                ref={hiddenInputRef}
+                value={currentInput}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                autoFocus
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                aria-label="Typing input"
+                style={{
+                    position: "absolute",
+                    opacity: 0,
+                    pointerEvents: "none",
+                    width: 1,
+                    height: 1,
+                    border: 0,
+                    padding: 0,
+                    resize: "none",
+                }}
+            />
+
+            {/* Visible input indicator + controls */}
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" justifyContent="space-between">
+                <Box
+                    sx={{
+                        flexGrow: 1,
+                        minHeight: 48,
+                        bgcolor: isDark ? "#1A1A2E" : "#FFF",
+                        border: "2px solid",
+                        borderColor: currentInput ? "primary.main" : isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)",
+                        borderRadius: 2,
+                        px: 2,
+                        py: 1.5,
+                        fontFamily: '"JetBrains Mono", monospace',
+                        fontSize: "1.1rem",
+                        color: "text.primary",
+                        width: "100%",
+                    }}
+                >
+                    {currentInput || (
+                        <Box component="span" sx={{ color: "text.secondary", fontStyle: "italic" }}>
+                            Start typing…
+                        </Box>
+                    )}
+                </Box>
+                <Stack direction="row" spacing={1}>
+                    <Tooltip title={isPaused ? "Resume (Esc)" : "Pause (Esc)"}>
+                        <IconButton onClick={togglePause} color="primary" sx={{ border: "1.5px solid", borderColor: "primary.main" }}>
+                            {isPaused ? <PlayArrowIcon /> : <PauseIcon />}
+                        </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Restart">
+                        <IconButton onClick={handleRestart} color="primary" sx={{ border: "1.5px solid", borderColor: "primary.main" }}>
+                            <RestartAltIcon />
+                        </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Back to picker">
+                        <IconButton onClick={handleBackToPicker} sx={{ border: "1.5px solid", borderColor: "text.secondary", color: "text.secondary" }}>
+                            <ArrowBackIcon />
+                        </IconButton>
+                    </Tooltip>
+                </Stack>
+            </Stack>
+        </Stack>
+    );
+
+    // ─── Render: game over view ──────────────────────────────────────────────
+    const renderGameOver = () => {
+        if (!finalStats) return null;
+        const stars = finalStats.score >= 200 ? 3 : finalStats.score >= 100 ? 2 : 1;
+        return (
+            <Card>
+                <CardContent sx={{ p: { xs: 3, md: 4 } }}>
+                    <Stack spacing={3} alignItems="center" textAlign="center">
+                        <Typography variant="h2" sx={{ color: "warning.main", fontSize: { xs: "2.5rem", md: "3.5rem" }, letterSpacing: 8 }}>
+                            {"★".repeat(stars)}{"☆".repeat(3 - stars)}
+                        </Typography>
+                        <Typography variant="h4" sx={{ color: "text.primary" }}>
+                            {finalStats.score >= 200 ? (
+                                <>Out<Box component="span" sx={gradientText}>standing!</Box></>
+                            ) : finalStats.score >= 100 ? (
+                                <>Nice <Box component="span" sx={gradientText}>run!</Box></>
+                            ) : (
+                                <>Keep <Box component="span" sx={gradientText}>training!</Box></>
+                            )}
+                        </Typography>
+
+                        {finalStats.isNewBest && (
+                            <Chip
+                                icon={<EmojiEventsIcon sx={{ color: "#FFC700 !important" }} />}
+                                label="NEW PERSONAL BEST"
+                                sx={{
+                                    bgcolor: "rgba(255,199,0,0.15)",
+                                    color: "warning.main",
+                                    border: "1.5px solid",
+                                    borderColor: "warning.main",
+                                    fontWeight: 700,
+                                }}
+                            />
+                        )}
+
+                        <Box
+                            sx={{
+                                display: "grid",
+                                gap: 2,
+                                width: "100%",
+                                gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" },
+                            }}
+                        >
+                            {[
+                                { label: "Score", value: finalStats.score, color: "#C8456D" },
+                                { label: "WPM", value: finalStats.wpm, color: "#FFC700" },
+                                { label: "Accuracy", value: `${finalStats.accuracy}%`, color: "#E78AAC" },
+                                { label: "Best Streak", value: finalStats.bestStreak, color: "#FF6B35" },
+                                { label: "Caught", value: finalStats.wordsCaught, color: "#7BE093" },
+                                { label: "Missed", value: finalStats.wordsMissed, color: "#9B2E54" },
+                                { label: "Traps Hit", value: finalStats.wrongTyped, color: "#FF6B6B" },
+                                { label: "Prev Best", value: personalBest?.score ?? "—", color: "#7C2D54" },
+                            ].map((s) => (
+                                <Box key={s.label} sx={{ textAlign: "center" }}>
+                                    <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 700 }}>
+                                        {s.label}
+                                    </Typography>
+                                    <Typography variant="h5" sx={{ color: s.color, lineHeight: 1, mt: 0.5 }}>
+                                        {s.value}
+                                    </Typography>
+                                </Box>
+                            ))}
+                        </Box>
+
+                        <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                            {showSubmitButton && (
+                                <Button
+                                    variant="contained"
+                                    color="primary"
+                                    size="large"
+                                    onClick={handleSubmitScore}
+                                    disabled={isSubmitting}
+                                    startIcon={isSubmitting ? <CircularProgress size={18} color="inherit" /> : <EmojiEventsIcon />}
+                                >
+                                    {isSubmitting ? "Submitting…" : "Submit to Leaderboard"}
+                                </Button>
+                            )}
+                            <Button variant="outlined" color="primary" size="large" startIcon={<RestartAltIcon />} onClick={handleRestart}>
+                                Play Again
+                            </Button>
+                            <Button variant="text" color="primary" size="large" onClick={handleBackToPicker}>
+                                Pick another
+                            </Button>
+                        </Stack>
+                    </Stack>
+                </CardContent>
+            </Card>
+        );
+    };
+
+    return (
+        <Box sx={{ bgcolor: "background.default", minHeight: "100vh", position: "relative", overflow: "hidden" }}>
+            <Box
+                sx={{
+                    position: "absolute",
+                    top: -160,
+                    right: -160,
+                    width: 420,
+                    height: 420,
+                    borderRadius: "50%",
+                    background: "radial-gradient(circle, #C8456D 0%, transparent 70%)",
+                    opacity: isDark ? 0.22 : 0.14,
+                    filter: "blur(28px)",
+                    pointerEvents: "none",
+                }}
+            />
+            <Box
+                sx={{
+                    position: "absolute",
+                    bottom: -200,
+                    left: -200,
+                    width: 480,
+                    height: 480,
+                    borderRadius: "50%",
+                    background: "radial-gradient(circle, #FFC700 0%, transparent 70%)",
+                    opacity: isDark ? 0.16 : 0.10,
+                    filter: "blur(32px)",
+                    pointerEvents: "none",
+                }}
+            />
+
+            <Snackbar
+                open={snackbarOpen}
+                autoHideDuration={5000}
+                onClose={() => setSnackbarOpen(false)}
+                anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+            >
+                <Alert onClose={() => setSnackbarOpen(false)} severity={submitSuccess ? "success" : "error"} sx={{ width: "100%" }}>
+                    {submitMessage}
+                </Alert>
+            </Snackbar>
+
+            <Box sx={{ position: "relative", zIndex: 1, maxWidth: 1100, mx: "auto", px: { xs: 2, md: 4 }, py: { xs: 4, md: 6 } }}>
+                <Stack spacing={1} sx={{ mb: 4 }}>
+                    <Typography variant="overline" sx={{ color: "primary.main", fontWeight: 700, letterSpacing: 2 }}>
+                        Falling Code
+                    </Typography>
+                    <Typography variant="h3" sx={{ color: "text.primary" }}>
+                        Catch the <Box component="span" sx={gradientText}>keywords</Box>
+                    </Typography>
+                </Stack>
+
+                {view === "picker" && renderPicker()}
+                {view === "playing" && selectedChallenge && renderPlaying()}
+                {view === "gameover" && renderGameOver()}
+            </Box>
+        </Box>
+    );
 };
 
 export default FallingTypingTest;

@@ -1,566 +1,909 @@
-import React, { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
-import "../css/typingtest.css";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { API_BASE } from "../utils/api";
-import { useScoreSubmission } from '../hooks/useScoreSubmission';
-import CircularProgress from "@mui/material/CircularProgress";
-import Button from "@mui/material/Button";
-import Snackbar from "@mui/material/Snackbar";
-import Alert from "@mui/material/Alert";
+import { authFetch } from "../utils/authFetch";
+import { useScoreSubmission } from "../hooks/useScoreSubmission";
+import {
+    Box,
+    Card,
+    CardContent,
+    Stack,
+    Typography,
+    Button,
+    Chip,
+    IconButton,
+    LinearProgress,
+    CircularProgress,
+    Snackbar,
+    Alert,
+    Divider,
+    Tooltip,
+    useTheme,
+} from "@mui/material";
+import KeyboardIcon from "@mui/icons-material/Keyboard";
+import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
+import BoltIcon from "@mui/icons-material/Bolt";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import RestartAltIcon from "@mui/icons-material/RestartAlt";
+import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import codeChallenges from "./codeChallenges";
-import AdvancedFallingLocalSetup from "./AdvancedFallingLocalSetup";
+
+const gradientText = {
+    background: "linear-gradient(90deg, #C8456D 0%, #E78AAC 50%, #FFC700 100%)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+    backgroundClip: "text",
+    display: "inline-block",
+};
+
+const DIFF_COLOR = { easy: "#2D7A3A", medium: "#B45309", hard: "#9B2E54" };
+const DIFF_LABEL = { easy: "EASY", medium: "MEDIUM", hard: "HARD" };
+
+const PB_PREFIX = "tt:best:";
+const loadPersonalBest = (challengeId) => {
+    try {
+        const raw = localStorage.getItem(`${PB_PREFIX}${challengeId}`);
+        return raw ? JSON.parse(raw) : null;
+    } catch {
+        return null;
+    }
+};
+const savePersonalBest = (challengeId, stats) => {
+    try {
+        localStorage.setItem(`${PB_PREFIX}${challengeId}`, JSON.stringify(stats));
+    } catch {}
+};
+
+// The user only types the answer characters that fill the blanks (not the whole code).
+// Expected text = concatenation of all answers in order.
+const buildExpected = (challenge) => {
+    if (!challenge) return "";
+    const { answers = [] } = challenge;
+    return answers.join("");
+};
+
+// Split code by "___" into static parts that surround each blank.
+// Returns: { parts: string[], answers: string[] }
+// where parts.length === answers.length + 1
+const tokenizeChallenge = (challenge) => {
+    if (!challenge) return { parts: [""], answers: [] };
+    const { code = "", answers = [] } = challenge;
+    const parts = code.split("___");
+    return { parts, answers };
+};
+
+// Compute final stats from input vs expected, given elapsed seconds.
+const computeStats = (input, expected, elapsedSeconds) => {
+    const trimmed = input.slice(0, expected.length);
+    let correctChars = 0;
+    for (let i = 0; i < expected.length; i++) {
+        if (trimmed[i] === expected[i]) correctChars++;
+    }
+    const totalChars = expected.length;
+    const accuracy = totalChars > 0 ? Math.round((correctChars / totalChars) * 100) : 0;
+    // Industry-standard WPM = (chars / 5) / minutes
+    const minutes = Math.max(elapsedSeconds, 1) / 60;
+    const wpm = Math.round((trimmed.length / 5) / minutes);
+    // Blended score: 70% accuracy, 30% speed (capped at 100 WPM for the speed term).
+    const score = Math.round(accuracy * 0.7 + Math.min(wpm, 100) * 0.3);
+    const errors = totalChars - correctChars;
+    return { accuracy, wpm, score, errors, correctChars, totalChars, trimmedLen: trimmed.length };
+};
 
 const TypingTest = () => {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [challenges, setChallenges] = useState([]);
-  const [selectedChallenge, setSelectedChallenge] = useState(null);
-  const [sampleParagraph, setSampleParagraph] = useState("");
-  const [input, setInput] = useState("");
-  const [correctCount, setCorrectCount] = useState(0);
-  const [isTestComplete, setIsTestComplete] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [blankIndices, setBlankIndices] = useState([]);
-  const [challengeType, setChallengeType] = useState("normal");
-  const [startTime, setStartTime] = useState(null);
-  const [elapsedTime, setElapsedTime] = useState(0);
-  const [wpm, setWpm] = useState(0);
-  const [score, setScore] = useState(0);
-  const [blankInputs, setBlankInputs] = useState([]);
-  const [showCursor, setShowCursor] = useState(true);
+    const theme = useTheme();
+    const isDark = theme.palette.mode === "dark";
+    const navigate = useNavigate();
 
-  // Leaderboard submission state
-  const [showSubmitButton, setShowSubmitButton] = useState(false);
-  const { submitScore, isSubmitting, submitMessage, submitSuccess, snackbarOpen, setSnackbarOpen } = useScoreSubmission();
+    // View state: 'picker' (mode picker), 'list' (challenge list), 'test' (active test)
+    const [view, setView] = useState("picker");
+    const [challenges, setChallenges] = useState([]);
+    const [selectedChallenge, setSelectedChallenge] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
 
-  const navigate = useNavigate();
-  const toggleMenu = () => setIsMenuOpen((prev) => !prev);
+    // Typing state
+    const [input, setInput] = useState("");
+    const [startTime, setStartTime] = useState(null);
+    const [elapsedTime, setElapsedTime] = useState(0);
+    const [wpm, setWpm] = useState(0);
+    const [accuracy, setAccuracy] = useState(100);
+    const [isTestComplete, setIsTestComplete] = useState(false);
+    const [finalStats, setFinalStats] = useState(null);
+    const [showCursor, setShowCursor] = useState(true);
+    const [personalBest, setPersonalBest] = useState(null);
 
-  // ✅ Fetch challenge list
-  const fetchChallengeList = async (type) => {
-    setError(null);
-    try {
-      if (type === "normal") {
-        setChallenges(codeChallenges);
-      } else if (type === "falling") {
-        const res = await fetch(`${API_BASE}/api/challenges/falling`);
-        if (!res.ok) throw new Error("Failed to fetch falling challenges");
-        const data = await res.json();
-        setChallenges(data);
-      } else if (type === "advancedFalling") {
-       setChallenges(AdvancedFallingLocalSetup);
-      } else {
-        throw new Error("Unknown challenge type");
-      }
-    } catch (err) {
-      setError(err.message || "Failed to load challenges.");
-    } finally {
-      setLoading(false);
-    }
-  };
+    // Refs
+    const hiddenInputRef = useRef(null);
+    const expectedRef = useRef("");
 
-  // ✅ Load selected challenge
-  const loadSelectedChallenge = async (challenge) => {
-    try {
-      if (challengeType === "normal") {
-        setSelectedChallenge(challenge);
-        setBlankInputs(new Array(challenge.answers.length).fill(""));
+    // Score submission
+    const [showSubmitButton, setShowSubmitButton] = useState(false);
+    const { submitScore, isSubmitting, submitMessage, submitSuccess, snackbarOpen, setSnackbarOpen } =
+        useScoreSubmission();
+
+    // Load challenge list for code/paragraph mode
+    const fetchCodeChallenges = useCallback(() => {
+        setError(null);
+        setLoading(true);
+        try {
+            setChallenges(codeChallenges);
+        } catch (err) {
+            setError("Failed to load challenges.");
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    // Reset typing state to baseline for the current challenge.
+    const resetTypingState = useCallback(() => {
         setInput("");
+        setStartTime(null);
+        setElapsedTime(0);
+        setWpm(0);
+        setAccuracy(100);
         setIsTestComplete(false);
-      } else if (challengeType === "falling") {
-        const res = await fetch(
-          `${API_BASE}/api/challenges/falling/${challenge.challengeId || challenge.id}`
-        );
-        if (!res.ok) throw new Error("Failed to load falling challenge");
-        const data = await res.json();
-        sessionStorage.setItem("fallingChallenge", JSON.stringify(data));
-        navigate("/fallingtypingtest");
-        return;
-      } else if (challengeType === "advancedFalling") {
-         sessionStorage.setItem(
-    "fallingGameConfig",
-    JSON.stringify(challenge.config)
-  );
+        setFinalStats(null);
+        setShowSubmitButton(false);
+    }, []);
 
-  navigate("/fallingtypingtest2");
-  return;
-      } else {
-        throw new Error("Unknown challenge type");
-      }
+    // Auto-complete handler.
+    const completeTest = useCallback(
+        (currentInput) => {
+            if (!selectedChallenge || isTestComplete) return;
+            const startedAt = startTime || Date.now();
+            const elapsed = Math.max(1, Math.floor((Date.now() - startedAt) / 1000));
+            const expected = expectedRef.current;
+            const stats = computeStats(currentInput, expected, elapsed);
+            setElapsedTime(elapsed);
+            setWpm(stats.wpm);
+            setAccuracy(stats.accuracy);
+            setFinalStats(stats);
+            setIsTestComplete(true);
+            setShowSubmitButton(true);
 
-      setInput("");
-      setCorrectCount(0);
-      setIsTestComplete(false);
-      setStartTime(null);
-      setElapsedTime(0);
-      setWpm(0);
-      setScore(0);
-    } catch (err) {
-      setError(err.message || "Failed to load challenge details.");
-    }
-  };
+            // Personal best
+            const prev = personalBest;
+            if (!prev || stats.score > prev.score) {
+                const newPB = { score: stats.score, wpm: stats.wpm, accuracy: stats.accuracy, at: Date.now() };
+                savePersonalBest(selectedChallenge.id, newPB);
+                setPersonalBest(newPB);
+            }
+        },
+        [selectedChallenge, isTestComplete, startTime, personalBest]
+    );
 
-  // Timer effect
-  useEffect(() => {
-    let timer;
-    if (startTime && !isTestComplete) {
-      timer = setInterval(() => {
-        const now = Date.now();
-        const seconds = Math.floor((now - startTime) / 1000);
-        setElapsedTime(seconds);
-        const wordsTyped = input.length / 5;
-        const liveWpm = seconds > 0 ? Math.round((wordsTyped / seconds) * 60) : 0;
-        setWpm(liveWpm);
-      }, 1000);
-    }
-    return () => clearInterval(timer);
-  }, [startTime, isTestComplete, input]);
-
-  useEffect(() => {
-    if (!selectedChallenge || isTestComplete) return;
-    const handleKeyDown = (e) => {
-      if (e.key.length === 1) {
-        if (!startTime) setStartTime(Date.now());
-        setInput((prev) => prev + e.key);
-      }
-      if (e.key === "Backspace") {
-        setInput((prev) => prev.slice(0, -1));
-      }
-      if (e.key === "Enter") {
-        setInput((prev) => prev + "\n");
-      }
+    // Handle input changes from the hidden input.
+    const handleInputChange = (e) => {
+        if (isTestComplete) return;
+        const value = e.target.value;
+        // Start the clock on first keystroke.
+        if (startTime === null && value.length > 0) {
+            setStartTime(Date.now());
+        }
+        // Don't allow typing past the expected length.
+        const expected = expectedRef.current;
+        const next = value.slice(0, expected.length);
+        setInput(next);
+        // Auto-complete when full match.
+        if (next.length === expected.length && next === expected) {
+            completeTest(next);
+        }
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedChallenge, isTestComplete, startTime]);
 
-  useEffect(() => {
-    if (!selectedChallenge || isTestComplete) return;
-    const interval = setInterval(() => {
-      setShowCursor((prev) => !prev);
-    }, 500);
-    return () => clearInterval(interval);
-  }, [selectedChallenge, isTestComplete]);
+    // Block destructive keys before they hit the input.
+    const handleKeyDown = (e) => {
+        // Block modifier shortcuts (Ctrl/Cmd/Alt + letter) — but allow shift for capitals.
+        if ((e.ctrlKey || e.metaKey || e.altKey) && e.key.length === 1) {
+            e.preventDefault();
+            return;
+        }
+        // Tab: prevent focus loss. Only insert characters if the next expected char is whitespace.
+        if (e.key === "Tab") {
+            e.preventDefault();
+            if (isTestComplete) return;
+            const expected = expectedRef.current;
+            const pos = input.length;
+            if (pos >= expected.length) return;
+            const nextChar = expected[pos];
+            if (nextChar !== "\t" && nextChar !== " ") return; // no-op if blank doesn't need whitespace
+            let toInsert = "";
+            if (nextChar === "\t") {
+                toInsert = "\t";
+            } else {
+                let i = pos;
+                while (i < expected.length && expected[i] === " " && i - pos < 4) {
+                    toInsert += " ";
+                    i++;
+                }
+            }
+            const newInput = (input + toInsert).slice(0, expected.length);
+            if (startTime === null) setStartTime(Date.now());
+            setInput(newInput);
+            if (newInput.length === expected.length && newInput === expected) {
+                completeTest(newInput);
+            }
+        }
+    };
 
-  useEffect(() => {
-    setLoading(true);
-    fetchChallengeList(challengeType);
-    setSelectedChallenge(null);
-    setSampleParagraph("");
-    setInput("");
-    setCorrectCount(0);
-    setIsTestComplete(false);
-    setStartTime(null);
-    setElapsedTime(0);
-    setWpm(0);
-    setScore(0);
-  }, [challengeType]);
+    // Refocus hidden input on container click.
+    const focusInput = () => {
+        if (hiddenInputRef.current) hiddenInputRef.current.focus();
+    };
 
-  // Complete test
-  const completeTest = () => {
-    if (!selectedChallenge || !startTime) return;
-    const endTime = Date.now();
-    const finalElapsed = Math.floor((endTime - startTime) / 1000);
-    const { code, answers } = selectedChallenge;
-    let fullExpected = code;
-    answers.forEach((answer) => {
-      fullExpected = fullExpected.replace("___", answer);
-    });
-    const trimmedInput = input.slice(0, fullExpected.length);
-    let correctChars = 0;
-    for (let i = 0; i < fullExpected.length; i++) {
-      if (trimmedInput[i] === fullExpected[i]) {
-        correctChars++;
-      }
-    }
-    const totalChars = fullExpected.length;
-    const accuracyPercent = totalChars > 0 ? Math.round((correctChars / totalChars) * 100) : 0;
-    const wordCount = trimmedInput.trim().split(/\s+/).filter(Boolean).length;
-    const finalWpm = finalElapsed > 0 ? Math.round((wordCount / finalElapsed) * 60) : 0;
-    let timeMultiplier = 1;
-    if (finalElapsed <= 60) timeMultiplier = 1;
-    else if (finalElapsed <= 90) timeMultiplier = 0.95;
-    else if (finalElapsed <= 120) timeMultiplier = 0.9;
-    else timeMultiplier = 0.8;
-    const finalScore = Math.min(100, Math.round(accuracyPercent * timeMultiplier));
-    setCorrectCount(correctChars);
-    setElapsedTime(finalElapsed);
-    setWpm(finalWpm);
-    setIsTestComplete(true);
-    setScore(finalScore);
-    fetch(`${API_BASE}/api/scores`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        score: finalScore,
-        timeInSeconds: finalElapsed,
-        challengeType: "normal",
-      }),
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to save score");
-        console.log("✅ Score submitted successfully!");
-      })
-      .catch((err) => {
-        console.error("❌ Error submitting score:", err);
-      });
-    setShowSubmitButton(true);
-  };
+    // Manual submit (when user clicks Submit Test button).
+    const handleManualSubmit = () => completeTest(input);
 
-  // Submit score to leaderboard
-  const handleSubmitScore = async () => {
-    const { code, answers } = selectedChallenge;
-    const parts = code.split('___');
-    let fullExpected = parts[0];
-    answers.forEach((answer, i) => {
-      fullExpected += answer + (parts[i + 1] || '');
-    });
-    const trimmedInput = input.slice(0, fullExpected.length);
-    let correctChars = 0;
-    for (let i = 0; i < fullExpected.length; i++) {
-      if (trimmedInput[i] === fullExpected[i]) {
-        correctChars++;
-      }
-    }
-    const totalChars = fullExpected.length;
-    const accuracy = totalChars > 0 ? Math.round((correctChars / totalChars) * 100) : 0;
-    const payload = { wpm: wpm, accuracy: accuracy, score: score };
-    const success = await submitScore('TYPING_TESTS', payload);
-    if (success) {
-      setShowSubmitButton(false);
-    }
-  };
+    // Restart the current challenge.
+    const handleRestart = () => {
+        resetTypingState();
+        setTimeout(focusInput, 0);
+    };
 
-  const parseCodeSegments = () => {
-    if (!selectedChallenge) return [];
-    const { code, answers } = selectedChallenge;
-    const parts = code.split("___");
-    const segments = [];
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i]) segments.push({ type: "text", content: parts[i] });
-      if (i < parts.length - 1) {
-        segments.push({
-          type: "blank",
-          index: i,
-          expected: answers[i] || "",
-          value: blankInputs[i] || ""
+    // Back to challenge list.
+    const handleBackToList = () => {
+        setSelectedChallenge(null);
+        resetTypingState();
+        setView("list");
+    };
+
+    // Submit score to leaderboard (single source of truth — only this path POSTs).
+    const handleSubmitScore = async () => {
+        if (!finalStats) return;
+        const success = await submitScore("TYPING_TESTS", {
+            wpm: finalStats.wpm,
+            accuracy: finalStats.accuracy,
+            score: finalStats.score,
         });
-      }
-    }
-    return segments;
-  };
+        if (success) setShowSubmitButton(false);
+    };
 
-  // ── Colored text rendering ──────────────────────────────────────────────────
-  const renderColoredText = () => {
-    if (!selectedChallenge) return null;
-    const { code, answers } = selectedChallenge;
-    const parts = code.split("___");
-    let inputIndex = 0;
+    // Load selected challenge → enter test view.
+    const handleSelectChallenge = (challenge) => {
+        setSelectedChallenge(challenge);
+        expectedRef.current = buildExpected(challenge);
+        resetTypingState();
+        setPersonalBest(loadPersonalBest(challenge.id));
+        setView("test");
+        setTimeout(focusInput, 50);
+    };
+
+    // Timer effect
+    useEffect(() => {
+        if (!startTime || isTestComplete) return;
+        const timer = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            setElapsedTime(elapsed);
+            const expected = expectedRef.current;
+            const stats = computeStats(input, expected, Math.max(1, elapsed));
+            setWpm(stats.wpm);
+            setAccuracy(stats.accuracy);
+        }, 250);
+        return () => clearInterval(timer);
+    }, [startTime, isTestComplete, input]);
+
+    // Cursor blink
+    useEffect(() => {
+        if (isTestComplete) return;
+        const i = setInterval(() => setShowCursor((s) => !s), 500);
+        return () => clearInterval(i);
+    }, [isTestComplete]);
+
+    // Render code with static parts (dimmed) and blanks (active typing slots).
+    const renderTypingDisplay = () => {
+        const { parts, answers } = tokenizeChallenge(selectedChallenge);
+        const inputLen = input.length;
+
+        // Determine input offset for each blank (where in `input` it starts).
+        let runningOffset = 0;
+        const blankRanges = answers.map((ans) => {
+            const start = runningOffset;
+            const end = start + ans.length;
+            runningOffset = end;
+            return { start, end, length: ans.length };
+        });
+
+        // Which blank is the cursor currently in?
+        const activeBlankIdx = blankRanges.findIndex(
+            (r) => inputLen >= r.start && inputLen < r.end
+        );
+        // If all blanks done, activeBlankIdx === -1 and we're past the end.
+
+        return (
+            <Box
+                onClick={focusInput}
+                sx={{
+                    p: { xs: 2, md: 3 },
+                    bgcolor: isDark ? "#0A0A14" : "#1A1A2E",
+                    color: "#FFF8F0",
+                    border: "2px solid",
+                    borderColor: "primary.main",
+                    borderRadius: 2,
+                    fontFamily: '"JetBrains Mono", Menlo, Monaco, Consolas, monospace',
+                    fontSize: { xs: "0.9rem", md: "1.05rem" },
+                    lineHeight: 1.7,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    cursor: "text",
+                    userSelect: "none",
+                    minHeight: 200,
+                    position: "relative",
+                }}
+            >
+                {parts.map((part, i) => {
+                    const segments = [];
+                    // Static text segment — dimmed, not typed.
+                    segments.push(
+                        <Box key={`text-${i}`} component="span" sx={{ color: "#6B7280" }}>
+                            {part}
+                        </Box>
+                    );
+                    // Blank slot after this part (if any).
+                    if (i < answers.length) {
+                        const range = blankRanges[i];
+                        const answer = answers[i];
+                        const isActiveBlank = i === activeBlankIdx;
+                        const blankDone = inputLen >= range.end;
+                        const blankPending = inputLen < range.start;
+
+                        segments.push(
+                            <Box
+                                key={`blank-${i}`}
+                                component="span"
+                                sx={{
+                                    display: "inline-block",
+                                    px: 0.5,
+                                    mx: 0.25,
+                                    borderRadius: 0.75,
+                                    bgcolor: blankPending
+                                        ? "rgba(255, 199, 0, 0.08)"
+                                        : isActiveBlank
+                                        ? "rgba(200, 69, 109, 0.18)"
+                                        : "transparent",
+                                    border: "1.5px solid",
+                                    borderColor: blankPending
+                                        ? "rgba(255, 199, 0, 0.4)"
+                                        : isActiveBlank
+                                        ? "#C8456D"
+                                        : blankDone
+                                        ? "rgba(45, 122, 58, 0.5)"
+                                        : "rgba(255, 199, 0, 0.4)",
+                                    position: "relative",
+                                }}
+                            >
+                                {answer.split("").map((char, j) => {
+                                    const absPos = range.start + j;
+                                    const typedChar = input[absPos];
+                                    const untyped = typedChar === undefined;
+                                    const correct = !untyped && typedChar === char;
+                                    let color, bg;
+                                    let displayChar;
+                                    if (untyped) {
+                                        color = "#FFC700";
+                                        bg = "transparent";
+                                        displayChar = "_";
+                                    } else if (correct) {
+                                        color = "#7BE093";
+                                        bg = "transparent";
+                                        displayChar = typedChar === "\n" ? "↵" : typedChar === " " ? "·" : typedChar;
+                                    } else {
+                                        color = "#FF6B6B";
+                                        bg = "rgba(255, 68, 68, 0.25)";
+                                        displayChar = typedChar === "\n" ? "↵" : typedChar === " " ? "·" : typedChar || "_";
+                                    }
+                                    const isCursorHere = absPos === inputLen;
+                                    return (
+                                        <Box
+                                            key={j}
+                                            component="span"
+                                            sx={{
+                                                color,
+                                                backgroundColor: bg,
+                                                position: "relative",
+                                                borderRadius: "2px",
+                                                fontWeight: 700,
+                                            }}
+                                        >
+                                            {isCursorHere && !isTestComplete && (
+                                                <Box
+                                                    component="span"
+                                                    sx={{
+                                                        position: "absolute",
+                                                        left: -1,
+                                                        top: "10%",
+                                                        height: "80%",
+                                                        width: "2px",
+                                                        bgcolor: "#C8456D",
+                                                        opacity: showCursor ? 1 : 0,
+                                                    }}
+                                                />
+                                            )}
+                                            {displayChar}
+                                        </Box>
+                                    );
+                                })}
+                            </Box>
+                        );
+                    }
+                    return segments;
+                })}
+            </Box>
+        );
+    };
+
+    // ─── VIEWS ─────────────────────────────────────────────────────────────────
+
+    // Mode picker (top-level)
+    const renderModePicker = () => (
+        <Box
+            sx={{
+                display: "grid",
+                gap: 3,
+                gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" },
+            }}
+        >
+            <Card
+                onClick={() => {
+                    fetchCodeChallenges();
+                    setView("list");
+                }}
+                sx={{ cursor: "pointer", transition: "transform 200ms", "&:hover": { transform: "translate(-3px,-3px)" } }}
+            >
+                <CardContent sx={{ p: 3 }}>
+                    <Stack spacing={2}>
+                        <Box sx={{ color: "primary.main" }}><KeyboardIcon fontSize="large" /></Box>
+                        <Typography variant="h5" sx={{ color: "text.primary" }}>Code Test</Typography>
+                        <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                            Type code snippets and fill in the blanks. Tracks WPM, accuracy, and personal best per challenge.
+                        </Typography>
+                        <Button variant="contained" color="primary" sx={{ alignSelf: "flex-start", mt: 1 }}>
+                            Pick a challenge →
+                        </Button>
+                    </Stack>
+                </CardContent>
+            </Card>
+
+            <Card
+                onClick={() => navigate("/fallingtypingtest")}
+                sx={{ cursor: "pointer", transition: "transform 200ms", "&:hover": { transform: "translate(-3px,-3px)" } }}
+            >
+                <CardContent sx={{ p: 3 }}>
+                    <Stack spacing={2}>
+                        <Box sx={{ color: "primary.main" }}><CloudDownloadIcon fontSize="large" /></Box>
+                        <Typography variant="h5" sx={{ color: "text.primary" }}>Falling Code</Typography>
+                        <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                            Catch keywords before they hit the ground. Reflex-based with lives and time pressure.
+                        </Typography>
+                        <Button variant="outlined" color="primary" sx={{ alignSelf: "flex-start", mt: 1 }}>
+                            Launch →
+                        </Button>
+                    </Stack>
+                </CardContent>
+            </Card>
+
+            <Card
+                onClick={() => navigate("/fallingtypingtest2")}
+                sx={{ cursor: "pointer", transition: "transform 200ms", "&:hover": { transform: "translate(-3px,-3px)" } }}
+            >
+                <CardContent sx={{ p: 3 }}>
+                    <Stack spacing={2}>
+                        <Box sx={{ color: "primary.main" }}><BoltIcon fontSize="large" /></Box>
+                        <Typography variant="h5" sx={{ color: "text.primary" }}>Bug Smasher</Typography>
+                        <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                            Falling code with wrong-word traps. Type only the correct C terminology — bad words (bugs) cost lives.
+                        </Typography>
+                        <Button variant="outlined" color="primary" sx={{ alignSelf: "flex-start", mt: 1 }}>
+                            Launch →
+                        </Button>
+                    </Stack>
+                </CardContent>
+            </Card>
+        </Box>
+    );
+
+    // Challenge list
+    const renderChallengeList = () => {
+        if (loading)
+            return (
+                <Card>
+                    <CardContent sx={{ p: 6, textAlign: "center" }}>
+                        <CircularProgress color="primary" />
+                        <Typography sx={{ mt: 2, color: "text.secondary" }}>Loading challenges…</Typography>
+                    </CardContent>
+                </Card>
+            );
+        if (error)
+            return (
+                <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>
+            );
+
+        return (
+            <Card>
+                <CardContent sx={{ p: { xs: 2, md: 3 } }}>
+                    <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
+                        <Typography variant="h5" sx={{ color: "text.primary" }}>
+                            Pick a <Box component="span" sx={gradientText}>challenge</Box>
+                        </Typography>
+                        <Button startIcon={<ArrowBackIcon />} onClick={() => setView("picker")} color="primary">
+                            Modes
+                        </Button>
+                    </Stack>
+
+                    {["easy", "medium", "hard"].map((level) => {
+                        const filtered = challenges.filter((c) => c.difficulty === level);
+                        if (filtered.length === 0) return null;
+                        return (
+                            <Box key={level} sx={{ mb: 3 }}>
+                                <Chip
+                                    label={DIFF_LABEL[level]}
+                                    size="small"
+                                    sx={{
+                                        bgcolor: `${DIFF_COLOR[level]}22`,
+                                        color: DIFF_COLOR[level],
+                                        border: "1.5px solid",
+                                        borderColor: DIFF_COLOR[level],
+                                        fontWeight: 700,
+                                        mb: 1.5,
+                                    }}
+                                />
+                                <Stack spacing={1}>
+                                    {filtered.map((c) => {
+                                        const best = loadPersonalBest(c.id);
+                                        return (
+                                            <Box
+                                                key={c.id}
+                                                onClick={() => handleSelectChallenge(c)}
+                                                sx={{
+                                                    p: 2,
+                                                    borderRadius: 2,
+                                                    border: "1.5px solid",
+                                                    borderColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)",
+                                                    cursor: "pointer",
+                                                    transition: "all 150ms",
+                                                    "&:hover": {
+                                                        borderColor: "primary.main",
+                                                        bgcolor: "rgba(200,69,109,0.06)",
+                                                        transform: "translateX(4px)",
+                                                    },
+                                                }}
+                                            >
+                                                <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
+                                                    <Stack direction="row" alignItems="center" spacing={2}>
+                                                        <Box
+                                                            sx={{
+                                                                width: 32,
+                                                                height: 32,
+                                                                borderRadius: 1,
+                                                                bgcolor: DIFF_COLOR[level],
+                                                                color: "#fff",
+                                                                display: "flex",
+                                                                alignItems: "center",
+                                                                justifyContent: "center",
+                                                                fontWeight: 700,
+                                                                fontSize: "0.85rem",
+                                                                flexShrink: 0,
+                                                            }}
+                                                        >
+                                                            {c.id}
+                                                        </Box>
+                                                        <Typography sx={{ color: "text.primary", fontWeight: 600 }}>
+                                                            {c.question}
+                                                        </Typography>
+                                                    </Stack>
+                                                    {best && (
+                                                        <Tooltip title={`Best: ${best.score} • ${best.wpm} WPM • ${best.accuracy}%`}>
+                                                            <Chip
+                                                                icon={<EmojiEventsIcon sx={{ fontSize: 14, color: "#FFC700 !important" }} />}
+                                                                label={best.score}
+                                                                size="small"
+                                                                sx={{
+                                                                    bgcolor: "rgba(255,199,0,0.15)",
+                                                                    color: "warning.main",
+                                                                    border: "1.5px solid",
+                                                                    borderColor: "warning.main",
+                                                                    fontWeight: 700,
+                                                                    flexShrink: 0,
+                                                                }}
+                                                            />
+                                                        </Tooltip>
+                                                    )}
+                                                </Stack>
+                                            </Box>
+                                        );
+                                    })}
+                                </Stack>
+                            </Box>
+                        );
+                    })}
+                </CardContent>
+            </Card>
+        );
+    };
+
+    // Active test view
+    const renderTest = () => {
+        const expected = expectedRef.current;
+        const progressPct = expected.length > 0 ? (input.length / expected.length) * 100 : 0;
+        return (
+            <Stack spacing={3}>
+                {/* Header row */}
+                <Card>
+                    <CardContent sx={{ p: { xs: 2, md: 3 } }}>
+                        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
+                            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                                <Typography variant="overline" sx={{ color: "primary.main", fontWeight: 700 }}>
+                                    Challenge #{selectedChallenge.id}
+                                </Typography>
+                                <Typography variant="h6" sx={{ color: "text.primary", mt: 0.5 }}>
+                                    {selectedChallenge.question}
+                                </Typography>
+                            </Box>
+                            <Button
+                                startIcon={<ArrowBackIcon />}
+                                onClick={handleBackToList}
+                                color="primary"
+                                variant="outlined"
+                                size="small"
+                            >
+                                Back
+                            </Button>
+                        </Stack>
+                    </CardContent>
+                </Card>
+
+                {/* Stats bar */}
+                <Box
+                    sx={{
+                        display: "grid",
+                        gap: 2,
+                        gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" },
+                    }}
+                >
+                    {[
+                        { label: "Time", value: `${String(elapsedTime).padStart(2, "0")}s`, color: "#C8456D" },
+                        { label: "WPM", value: wpm, color: "#FFC700" },
+                        { label: "Accuracy", value: `${accuracy}%`, color: "#E78AAC" },
+                        {
+                            label: "Best",
+                            value: personalBest ? personalBest.score : "—",
+                            color: "#9B2E54",
+                        },
+                    ].map((s) => (
+                        <Card key={s.label}>
+                            <CardContent sx={{ p: 2, textAlign: "center" }}>
+                                <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 700 }}>
+                                    {s.label}
+                                </Typography>
+                                <Typography variant="h4" sx={{ color: s.color, lineHeight: 1, mt: 0.5 }}>
+                                    {s.value}
+                                </Typography>
+                            </CardContent>
+                        </Card>
+                    ))}
+                </Box>
+
+                {/* Progress bar */}
+                <Box>
+                    <LinearProgress
+                        variant="determinate"
+                        value={progressPct}
+                        sx={{
+                            height: 8,
+                            borderRadius: 999,
+                            bgcolor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
+                            "& .MuiLinearProgress-bar": {
+                                background: "linear-gradient(90deg, #C8456D 0%, #FFC700 100%)",
+                                borderRadius: 999,
+                            },
+                        }}
+                    />
+                </Box>
+
+                {/* Typing display */}
+                {renderTypingDisplay()}
+
+                {/* Hidden textarea for keyboard capture — textarea so Enter inserts \n.
+                    Works on mobile + desktop (soft keyboard pops automatically when focused). */}
+                <textarea
+                    ref={hiddenInputRef}
+                    value={input}
+                    onChange={handleInputChange}
+                    onKeyDown={handleKeyDown}
+                    autoFocus
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    aria-label="Typing input"
+                    style={{
+                        position: "absolute",
+                        opacity: 0,
+                        pointerEvents: "none",
+                        width: 1,
+                        height: 1,
+                        border: 0,
+                        padding: 0,
+                        resize: "none",
+                    }}
+                />
+
+                {/* Action row */}
+                {!isTestComplete && (
+                    <Stack direction="row" spacing={2} justifyContent="center">
+                        <Button
+                            variant="outlined"
+                            color="primary"
+                            startIcon={<RestartAltIcon />}
+                            onClick={handleRestart}
+                        >
+                            Restart
+                        </Button>
+                        <Button
+                            variant="contained"
+                            color="primary"
+                            startIcon={<CheckCircleIcon />}
+                            onClick={handleManualSubmit}
+                        >
+                            Submit Test
+                        </Button>
+                    </Stack>
+                )}
+
+                {/* Completion banner */}
+                {isTestComplete && finalStats && renderCompletion()}
+            </Stack>
+        );
+    };
+
+    const renderCompletion = () => {
+        const stars = finalStats.score >= 90 ? 3 : finalStats.score >= 70 ? 2 : 1;
+        const isNewBest = personalBest && finalStats.score === personalBest.score && personalBest.at >= Date.now() - 5000;
+        return (
+            <Card>
+                <CardContent sx={{ p: { xs: 3, md: 4 } }}>
+                    <Stack spacing={3} alignItems="center" textAlign="center">
+                        <Typography variant="h2" sx={{ color: "warning.main", fontSize: { xs: "2.5rem", md: "3.5rem" }, letterSpacing: 8 }}>
+                            {"★".repeat(stars)}{"☆".repeat(3 - stars)}
+                        </Typography>
+                        <Typography variant="h4" sx={{ color: "text.primary" }}>
+                            {finalStats.score >= 90 ? (
+                                <>Out<Box component="span" sx={gradientText}>standing!</Box></>
+                            ) : finalStats.score >= 70 ? (
+                                <>Nice <Box component="span" sx={gradientText}>work!</Box></>
+                            ) : (
+                                <>Keep <Box component="span" sx={gradientText}>practicing!</Box></>
+                            )}
+                        </Typography>
+
+                        {isNewBest && (
+                            <Chip
+                                icon={<EmojiEventsIcon sx={{ color: "#FFC700 !important" }} />}
+                                label="NEW PERSONAL BEST"
+                                sx={{
+                                    bgcolor: "rgba(255,199,0,0.15)",
+                                    color: "warning.main",
+                                    border: "1.5px solid",
+                                    borderColor: "warning.main",
+                                    fontWeight: 700,
+                                }}
+                            />
+                        )}
+
+                        <Box sx={{ width: "100%" }}>
+                            <Divider sx={{ mb: 2 }} />
+                            <Box
+                                sx={{
+                                    display: "grid",
+                                    gap: 2,
+                                    gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(5, 1fr)" },
+                                }}
+                            >
+                                {[
+                                    { label: "Score", value: finalStats.score, color: "#C8456D" },
+                                    { label: "WPM", value: finalStats.wpm, color: "#FFC700" },
+                                    { label: "Accuracy", value: `${finalStats.accuracy}%`, color: "#E78AAC" },
+                                    { label: "Errors", value: finalStats.errors, color: "#9B2E54" },
+                                    { label: "Time", value: `${elapsedTime}s`, color: "#7C2D54" },
+                                ].map((s) => (
+                                    <Box key={s.label} sx={{ textAlign: "center" }}>
+                                        <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 700 }}>
+                                            {s.label}
+                                        </Typography>
+                                        <Typography variant="h4" sx={{ color: s.color, lineHeight: 1, mt: 0.5 }}>
+                                            {s.value}
+                                        </Typography>
+                                    </Box>
+                                ))}
+                            </Box>
+                        </Box>
+
+                        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ width: "100%", justifyContent: "center" }}>
+                            {showSubmitButton && (
+                                <Button
+                                    variant="contained"
+                                    color="primary"
+                                    size="large"
+                                    onClick={handleSubmitScore}
+                                    disabled={isSubmitting}
+                                    startIcon={
+                                        isSubmitting ? <CircularProgress size={18} color="inherit" /> : <EmojiEventsIcon />
+                                    }
+                                >
+                                    {isSubmitting ? "Submitting…" : "Submit to Leaderboard"}
+                                </Button>
+                            )}
+                            <Button variant="outlined" color="primary" size="large" onClick={handleRestart} startIcon={<RestartAltIcon />}>
+                                Try Again
+                            </Button>
+                            <Button variant="text" color="primary" size="large" onClick={handleBackToList}>
+                                Pick another
+                            </Button>
+                        </Stack>
+                    </Stack>
+                </CardContent>
+            </Card>
+        );
+    };
 
     return (
-      <div className="tt-code-area" onClick={() => { if (!startTime) setStartTime(Date.now()); }}>
-        {parts.map((part, i) => {
-          const elements = [];
+        <Box sx={{ bgcolor: "background.default", minHeight: "100vh", position: "relative", overflow: "hidden" }}>
+            {/* Ambient blobs */}
+            <Box
+                sx={{
+                    position: "absolute",
+                    top: -160,
+                    right: -160,
+                    width: 420,
+                    height: 420,
+                    borderRadius: "50%",
+                    background: "radial-gradient(circle, #C8456D 0%, transparent 70%)",
+                    opacity: isDark ? 0.22 : 0.14,
+                    filter: "blur(28px)",
+                    pointerEvents: "none",
+                }}
+            />
+            <Box
+                sx={{
+                    position: "absolute",
+                    bottom: -200,
+                    left: -200,
+                    width: 480,
+                    height: 480,
+                    borderRadius: "50%",
+                    background: "radial-gradient(circle, #FFC700 0%, transparent 70%)",
+                    opacity: isDark ? 0.16 : 0.10,
+                    filter: "blur(32px)",
+                    pointerEvents: "none",
+                }}
+            />
 
-          // Normal text characters
-          part.split("").forEach((char, j) => {
-            const isCursorHere = inputIndex === input.length && !isTestComplete;
-            const typedChar = input[inputIndex];
-            let charClass = "tt-char";
-            if (typedChar) charClass += typedChar === char ? " tt-char-correct" : " tt-char-wrong";
-
-            elements.push(
-              <span key={`char-${i}-${j}`} className={charClass} style={{ position: "relative" }}>
-                {isCursorHere && (
-                  <span className="tt-cursor" style={{ opacity: showCursor ? 1 : 0 }} />
-                )}
-                {char}
-              </span>
-            );
-            inputIndex++;
-          });
-
-          // Blank word
-          if (i < parts.length - 1) {
-            const expected = answers[i] || "";
-            const userTyped = input.slice(inputIndex, inputIndex + expected.length);
-            const blankFilled = userTyped.length === expected.length;
-            const blankCorrect = blankFilled && userTyped === expected;
-
-            expected.split("").forEach((char, j) => {
-              const isCursorHere = inputIndex === input.length && !isTestComplete;
-              const typedChar = userTyped[j];
-              let charClass = "tt-char tt-blank-char";
-              if (typedChar) charClass += typedChar === char ? " tt-char-correct" : " tt-char-wrong";
-              if (blankCorrect) charClass += " tt-blank-done";
-
-              elements.push(
-                <span key={`blank-${i}-${j}`} className={charClass} style={{ position: "relative" }}>
-                  {isCursorHere && (
-                    <span className="tt-cursor" style={{ opacity: showCursor ? 1 : 0 }} />
-                  )}
-                  {typedChar || "_"}
-                </span>
-              );
-              inputIndex++;
-            });
-          }
-
-          return elements;
-        })}
-
-        {/* Cursor at very end */}
-        {inputIndex === input.length && !isTestComplete && (
-          <span className="tt-cursor tt-cursor-end" style={{ opacity: showCursor ? 1 : 0 }} />
-        )}
-      </div>
-    );
-  };
-
-  const handleChallengeTypeChange = (type) => {
-    setChallengeType(type);
-  };
-
-  if (loading) return (
-    <div className="tt-loading">
-      <div className="tt-loading-inner">
-        <div className="tt-loading-spinner" />
-        <p>Loading challenges…</p>
-      </div>
-    </div>
-  );
-
-  if (error) return (
-    <div className="tt-error">
-      <span className="tt-error-icon">⚠️</span>
-      <p>{error}</p>
-    </div>
-  );
-
-  const DIFF_COLOR = { easy: "#2d7a3a", medium: "#b45309", hard: "#b91c1c" };
-  const DIFF_LABEL = { easy: "🟢 EASY", medium: "🟡 MEDIUM", hard: "🔴 HARD" };
-
-  return (
-    <>
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={5000}
-        onClose={() => setSnackbarOpen(false)}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-      >
-        <Alert
-          onClose={() => setSnackbarOpen(false)}
-          severity={submitSuccess ? "success" : "error"}
-          sx={{ width: "100%", fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}
-        >
-          {submitMessage}
-        </Alert>
-      </Snackbar>
-
-    <h1
-  className="tt-navbar-title"
-  style={{
-    padding: "24px 24px 0",
-    fontFamily: "'Press Start 2P', monospace",
-    fontSize: "11px",
-    color: "var(--ink)",
-    textAlign: "center",
-    width: "100%"
-  }}
->
-  ⌨️ Typing Test
-</h1>
-
-      {/* ── Page body ── */}
-      <div className="tt-page">
-
-        {/* ── Mode tabs ── */}
-        <div className="tt-tabs">
-          {[
-            { id: "normal",          label: "📝 Paragraph" },
-            
-            { id: "advancedFalling", label: "⚡ Advanced" },
-          ].map(({ id, label }) => (
-            <button
-              key={id}
-              className={`tt-tab${challengeType === id ? " tt-tab-active" : ""}`}
-              onClick={() => handleChallengeTypeChange(id)}
+            <Snackbar
+                open={snackbarOpen}
+                autoHideDuration={5000}
+                onClose={() => setSnackbarOpen(false)}
+                anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
             >
-              {label}
-            </button>
-          ))}
-        </div>
+                <Alert onClose={() => setSnackbarOpen(false)} severity={submitSuccess ? "success" : "error"} sx={{ width: "100%" }}>
+                    {submitMessage}
+                </Alert>
+            </Snackbar>
 
-        {/* ── Challenge list ── */}
-        {!selectedChallenge && (
-          <div className="tt-card">
-            <h3 className="tt-card-title">Select a Challenge</h3>
+            <Box sx={{ position: "relative", zIndex: 1, maxWidth: 1100, mx: "auto", px: { xs: 2, md: 4 }, py: { xs: 4, md: 6 } }}>
+                <Stack spacing={3} sx={{ mb: 4 }}>
+                    <Typography variant="overline" sx={{ color: "primary.main", fontWeight: 700, letterSpacing: 2 }}>
+                        Typing Test
+                    </Typography>
+                    <Typography variant="h3" sx={{ color: "text.primary" }}>
+                        Sharpen your <Box component="span" sx={gradientText}>syntax</Box>
+                    </Typography>
+                </Stack>
 
-            {["easy", "medium", "hard"].map((level) => {
-              const filtered = challenges.filter((c) => c.difficulty === level);
-              if (filtered.length === 0) return null;
-
-              return (
-                <div key={level} className="tt-diff-section">
-                  <div
-                    className="tt-diff-header"
-                    style={{ color: DIFF_COLOR[level], borderBottomColor: DIFF_COLOR[level] }}
-                  >
-                    {DIFF_LABEL[level]}
-                  </div>
-
-                  <ul className="tt-challenge-list">
-                    {filtered.map((challenge) => (
-                      <li key={challenge.id} className="tt-challenge-item">
-                        <span
-                          className="tt-challenge-badge"
-                          style={{ background: DIFF_COLOR[level] }}
-                        >
-                          {challenge.id}
-                        </span>
-                        <button
-                          className="tt-challenge-btn"
-                          onClick={() => loadSelectedChallenge(challenge)}
-                        >
-                          {challenge.question}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* ── Active challenge ── */}
-        {selectedChallenge && (
-          <div className="tt-challenge-wrap">
-
-            {/* Question banner */}
-            <div className="tt-question-banner">
-              <span className="tt-question-label">Challenge</span>
-              <span className="tt-question-text">{selectedChallenge.question}</span>
-            </div>
-
-            {/* Stats bar */}
-            <div className="tt-stats-bar">
-              <div className="tt-stat">
-                <div className="tt-stat-label">⏱ Time</div>
-                <div className="tt-stat-value tt-stat-green">
-                  {String(elapsedTime).padStart(2, "0")}
-                  <span className="tt-stat-unit">s</span>
-                </div>
-              </div>
-              <div className="tt-stat-divider" />
-              <div className="tt-stat">
-                <div className="tt-stat-label">⚡ WPM</div>
-                <div className="tt-stat-value tt-stat-blue">
-                  {String(wpm).padStart(2, "0")}
-                </div>
-              </div>
-              <div className="tt-stat-divider" />
-              <div className="tt-stat">
-                <div className="tt-stat-label">🎯 Score</div>
-                <div className="tt-stat-value tt-stat-red">
-                  {String(score).padStart(3, "0")}
-                </div>
-              </div>
-            </div>
-
-            {/* Code typing area */}
-            <div className="typing-container">
-              {renderColoredText()}
-            </div>
-
-            {/* Submit test button */}
-            {!isTestComplete && (
-              <div className="tt-action-row">
-                <button className="tt-submit-btn" onClick={() => completeTest(input)}>
-                  ✓ Submit Test
-                </button>
-                <button
-                  className="tt-back-btn"
-                  onClick={() => setSelectedChallenge(null)}
-                >
-                  ← Back
-                </button>
-              </div>
-            )}
-
-            {/* Post-test actions */}
-            {isTestComplete && (
-              <div className="tt-complete-banner">
-                <div className="tt-complete-stars">
-                  {score >= 90 ? "⭐⭐⭐" : score >= 70 ? "⭐⭐" : "⭐"}
-                </div>
-                <div className="tt-complete-msg">
-                  {score >= 90 ? "Outstanding!" : score >= 70 ? "Great work!" : "Keep practicing!"}
-                </div>
-                <div className="tt-complete-detail">
-                  Score <strong>{score}</strong> · {wpm} WPM · {elapsedTime}s
-                </div>
-              </div>
-            )}
-
-            {isTestComplete && showSubmitButton && (
-              <div className="tt-action-row">
-                <Button
-                  variant="contained"
-                  onClick={handleSubmitScore}
-                  disabled={isSubmitting}
-                  startIcon={isSubmitting ? <CircularProgress size={18} color="inherit" /> : null}
-                  sx={{
-                    background: "#e8622a",
-                    fontFamily: "'DM Sans', sans-serif",
-                    fontWeight: 700,
-                    fontSize: "13px",
-                    textTransform: "none",
-                    borderRadius: "6px",
-                    boxShadow: "0 3px 0 #c44e1e",
-                    padding: "10px 18px",
-                    "&:hover": { background: "#c44e1e", boxShadow: "0 3px 0 #a03c15" },
-                    "&:active": { boxShadow: "none", transform: "translateY(2px)" },
-                  }}
-                >
-                  {isSubmitting ? "Submitting…" : "Submit to Leaderboard"}
-                </Button>
-
-                {!isSubmitting && (
-                  <Button
-                    variant="outlined"
-                    onClick={() => {
-                      setShowSubmitButton(false);
-                      setInput("");
-                      setIsTestComplete(false);
-                      setStartTime(null);
-                      setElapsedTime(0);
-                      setWpm(0);
-                      setScore(0);
-                      setBlankInputs(new Array(selectedChallenge.answers.length).fill(""));
-                    }}
-                    sx={{
-                      fontFamily: "'DM Sans', sans-serif",
-                      fontWeight: 700,
-                      fontSize: "13px",
-                      textTransform: "none",
-                      borderRadius: "6px",
-                      borderColor: "#ddd5c5",
-                      color: "#1a1a2e",
-                      background: "#ede7d9",
-                      "&:hover": { background: "#ddd5c5", borderColor: "#1a1a2e" },
-                    }}
-                  >
-                    ↩ Retry
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </>
-  );
+                {view === "picker" && renderModePicker()}
+                {view === "list" && renderChallengeList()}
+                {view === "test" && selectedChallenge && renderTest()}
+            </Box>
+        </Box>
+    );
 };
 
 export default TypingTest;

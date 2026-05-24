@@ -2,13 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import DOMPurify from 'dompurify';
 import { API_BASE } from '../utils/api';
+import { authFetch } from '../utils/authFetch';
 
 export default function LessonDetail() {
   const { id } = useParams();
   const [lesson, setLesson] = useState(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/lessons/${id}`)
+    authFetch(`${API_BASE}/api/lessons/${id}`)
       .then((res) => res.json())
       .then((data) => setLesson(data))
       .catch((err) => console.error('Error fetching lesson:', err));

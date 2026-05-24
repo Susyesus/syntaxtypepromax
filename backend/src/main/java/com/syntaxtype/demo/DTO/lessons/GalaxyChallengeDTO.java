@@ -3,6 +3,7 @@ package com.syntaxtype.demo.DTO.lessons;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.syntaxtype.demo.Entity.Lessons.GalaxyChallengeClasses.QuestionTypes;
 
 import lombok.*;
@@ -16,11 +17,12 @@ public class GalaxyChallengeDTO {
     private String description;
     private List<QuestionDTO> questions = new ArrayList<>();
 
-    
+
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
     public static class QuestionDTO {
+        private Long id;
         private String question;
         private QuestionTypes type;
         private List<ChoiceDTO> choices = new ArrayList<>();
@@ -31,6 +33,8 @@ public class GalaxyChallengeDTO {
     @AllArgsConstructor
     public static class ChoiceDTO {
         private String choice;
+
+        @JsonInclude(JsonInclude.Include.NON_NULL)
         private Boolean isCorrect;
     }
 }

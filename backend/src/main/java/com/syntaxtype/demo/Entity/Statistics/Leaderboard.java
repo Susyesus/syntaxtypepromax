@@ -23,7 +23,7 @@ public class Leaderboard {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long leaderboardId;
 
-    @OneToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
     private User user;
 

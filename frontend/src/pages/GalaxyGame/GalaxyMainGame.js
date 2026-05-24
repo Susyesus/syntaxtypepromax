@@ -28,12 +28,14 @@ const GalaxyMainGame = () => {
 
     // 2. Reset refs
     gameTimeRef.current = 0;
+    realTimeRef.current = 0;
     difficultyRef.current = 1;
     scoreRef.current = 0;
     livesRef.current = 3;
     spawnTimerRef.current = -1.5;
     bossesDefeatedRef.current = 0;
-    
+    bossStateRef.current = { index: 0, lastBossDefeatedTime: 0 };
+
     enemiesRef.current = [];
     bulletsRef.current = [];
     targetEnemyRef.current = null;

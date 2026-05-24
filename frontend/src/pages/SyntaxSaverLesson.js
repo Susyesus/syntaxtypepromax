@@ -4,7 +4,35 @@ import React, { useState, useEffect } from "react";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import { lessons as quizLessons, quizTitle } from "./QuizData";
 import CodeWormBattle from "./CodeWormBattle";
+import { API_BASE } from "../utils/api";
+import { authFetch } from "../utils/authFetch";
 import "./SyntaxSaverLesson.css";
+
+// Convert a backend SyntaxSaverQuizDTO step into the legacy QuizData shape so the
+// existing UI components keep working unchanged.
+function adaptBackendStep(step) {
+  if (step.type === "MATCH") {
+    return {
+      id: step.id,
+      type: "match",
+      question: step.question,
+      options: step.options || [],
+      // correctAnswer is intentionally absent — validation now goes server-side
+    };
+  }
+  if (step.type === "REORDER") {
+    return {
+      id: step.id,
+      type: "reorder",
+      question: step.question,
+      parts: step.parts || [],
+    };
+  }
+  if (step.type === "BATTLE") {
+    return { id: step.id, type: "battle", question: step.question };
+  }
+  return null;
+}
 
 // ── Design Tokens (same as dashboard) ─────────────────────────────────────────
 const T = {
@@ -37,11 +65,35 @@ export default function SyntaxSaverLesson({ onBack }) {
   const [step, setStep] = useState(0);
   const [score, setScore] = useState(0);
   const [feedback, setFeedback] = useState("");
+  const [lessons, setLessons] = useState(quizLessons);
+  const [title, setTitle] = useState(quizTitle);
+  const [quizId, setQuizId] = useState(null);
 
-  const lessons = quizLessons;
   const current = lessons[step];
 
   useEffect(() => boot(), []);
+
+  // Fetch from backend; fall back silently to bundled QuizData if the API is unavailable.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authFetch(`${API_BASE}/api/syntax-saver`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled || !Array.isArray(data) || data.length === 0) return;
+        const quiz = data[0];
+        const adapted = (quiz.steps || []).map(adaptBackendStep).filter(Boolean);
+        if (adapted.length === 0) return;
+        setLessons(adapted);
+        setTitle(quiz.title || quizTitle);
+        setQuizId(quiz.id);
+      } catch {
+        // Keep bundled fallback
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const handleNext = (points = 0) => {
     setScore(prev => prev + points);
@@ -76,16 +128,16 @@ export default function SyntaxSaverLesson({ onBack }) {
 
         {/* HEADER */}
         <div className="st-header">
-          <h2>🧠 {quizTitle}</h2>
+          <h2>🧠 {title}</h2>
           <p>Step {step + 1} / {lessons.length}</p>
         </div>
 
         {/* CONTENT */}
         {current.type === "match" && (
-          <MatchQuestion data={current} onNext={handleNext} setFeedback={setFeedback} />
+          <MatchQuestion data={current} quizId={quizId} onNext={handleNext} setFeedback={setFeedback} />
         )}
         {current.type === "reorder" && (
-          <ReorderQuestion data={current} onNext={handleNext} setFeedback={setFeedback} />
+          <ReorderQuestion data={current} quizId={quizId} onNext={handleNext} setFeedback={setFeedback} />
         )}
         {current.type === "battle" && (
           <CodeWormBattle onNext={handleNext} />
@@ -115,11 +167,32 @@ export default function SyntaxSaverLesson({ onBack }) {
 }
 
 // ── MatchQuestion ─────────────────────────────────────────────────────────────
-function MatchQuestion({ data, onNext, setFeedback }) {
+function MatchQuestion({ data, quizId, onNext, setFeedback }) {
   const normalize = s => (s ?? "").toString().trim().toLowerCase();
 
-  const handleClick = opt => {
-    if (normalize(opt) === normalize(data.correct)) {
+  const handleClick = async (opt) => {
+    let correct = false;
+    if (quizId && data.id) {
+      // Server-side validation — the correct answer is never sent to the client
+      try {
+        const res = await authFetch(`${API_BASE}/api/syntax-saver/${quizId}/validate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ stepId: data.id, answer: opt }),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          correct = !!json.correct;
+        }
+      } catch {
+        // Fall through to client-side fallback if backend unreachable
+      }
+    } else if (data.correct) {
+      // Legacy local mode — bundled QuizData with a correct field
+      correct = normalize(opt) === normalize(data.correct);
+    }
+
+    if (correct) {
       setFeedback("✅ Correct!");
       onNext(10);
     } else {
@@ -153,7 +226,7 @@ const scramble = arr => {
   return a;
 };
 
-function ReorderQuestion({ data, onNext, setFeedback }) {
+function ReorderQuestion({ data, quizId, onNext, setFeedback }) {
   const [order, setOrder] = useState([]);
 
   useEffect(() => setOrder(scramble(data.parts)), [data.parts]);
@@ -166,8 +239,28 @@ function ReorderQuestion({ data, onNext, setFeedback }) {
     setOrder(newOrder);
   };
 
-  const handleSubmit = () => {
-    if (JSON.stringify(order) === JSON.stringify(data.parts)) {
+  const handleSubmit = async () => {
+    let correct = false;
+    if (quizId && data.id) {
+      try {
+        const res = await authFetch(`${API_BASE}/api/syntax-saver/${quizId}/validate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ stepId: data.id, order }),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          correct = !!json.correct;
+        }
+      } catch {
+        // Fall back to local comparison
+        correct = JSON.stringify(order) === JSON.stringify(data.parts);
+      }
+    } else {
+      correct = JSON.stringify(order) === JSON.stringify(data.parts);
+    }
+
+    if (correct) {
       setFeedback("✅ Correct!");
       onNext(15);
     } else {

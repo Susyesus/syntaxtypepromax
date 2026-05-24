@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { usePlayer } from "./usePlayer";
 import { useMap } from "./map";
 import { API_BASE } from '../utils/api';
+import { authFetch } from '../utils/authFetch';
 
 export default function Game() {
   const canvasRef = useRef(null);
@@ -47,7 +48,7 @@ const updatePowerups = () => {
   useEffect(() => {
     const fetchWords = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/challenges/galaxy/words`);
+        const res = await authFetch(`${API_BASE}/api/challenges/galaxy/words`);
         if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         const data = await res.json();
         setWords(data);
@@ -243,6 +244,10 @@ const drawPowerups = (ctx) => {
       // Backspace
       if (key === "backspace") {
         typedLettersRef.current = typedLettersRef.current.slice(0, -1);
+        if (typedLettersRef.current.length === 0) {
+          currentTargetRef.current = null;
+          currentPowerupRef.current = null;
+        }
         return;
       }
 

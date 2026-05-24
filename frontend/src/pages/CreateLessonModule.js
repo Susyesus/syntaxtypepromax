@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Editor } from '@tinymce/tinymce-react';
 import { API_BASE } from '../utils/api';
+import { authFetch } from '../utils/authFetch';
 
 const CreateLessonModule = () => {
   const [title, setTitle] = useState('');
@@ -16,7 +17,7 @@ const CreateLessonModule = () => {
     console.log("Submitting content:", content);
     
     try {
-      const response = await fetch(`${API_BASE}/api/lessons`, {
+      const response = await authFetch(`${API_BASE}/api/lessons`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, content }),
