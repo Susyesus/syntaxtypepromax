@@ -6,7 +6,9 @@ import com.syntaxtype.demo.features.statistics.dto.ScoreSubmissionRequest;
 import com.syntaxtype.demo.core.enums.Category;
 import com.syntaxtype.demo.core.security.CustomUserDetails;
 import com.syntaxtype.demo.features.lesson.service.ScoreService;
+import com.syntaxtype.demo.features.statistics.service.AchievementEvaluatorService;
 import com.syntaxtype.demo.features.statistics.service.LeaderboardService;
+import com.syntaxtype.demo.features.statistics.service.UserStatisticsService;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -24,10 +26,17 @@ public class ScoreController {
 
     private final ScoreService scoreService;
     private final LeaderboardService leaderboardService;
+    private final UserStatisticsService userStatisticsService;
+    private final AchievementEvaluatorService achievementEvaluatorService;
 
-    public ScoreController(ScoreService scoreService, LeaderboardService leaderboardService) {
+    public ScoreController(ScoreService scoreService,
+                           LeaderboardService leaderboardService,
+                           UserStatisticsService userStatisticsService,
+                           AchievementEvaluatorService achievementEvaluatorService) {
         this.scoreService = scoreService;
         this.leaderboardService = leaderboardService;
+        this.userStatisticsService = userStatisticsService;
+        this.achievementEvaluatorService = achievementEvaluatorService;
     }
     @PostMapping
     public ResponseEntity<Score> submitScore(@RequestBody ScoreDTO scoreDTO) {
@@ -102,14 +111,21 @@ public class ScoreController {
         score.setUser(userDetails.getUser());
         scoreService.saveScore(score);
 
+        int wpm      = Optional.ofNullable(request.getWpm()).orElse(0);
+        int accuracy = Optional.ofNullable(request.getAccuracy()).orElse(100);
+        int rawScore = Optional.ofNullable(request.getScore()).orElse(0);
+
         // Update leaderboard if better
         LeaderboardUpdateResult result = leaderboardService.updateLeaderboardIfBetter(
-                username,
-                categoryEnum,
-                Optional.ofNullable(request.getWpm()).orElse(0),
-                Optional.ofNullable(request.getAccuracy()).orElse(100),
-                Optional.ofNullable(request.getScore()).orElse(0)
-        );
+                username, categoryEnum, wpm, accuracy, rawScore);
+
+        // Accumulate lifetime XP (every session, regardless of whether it's a new best)
+        userStatisticsService.addLifetimeXp(userDetails.getUser(), rawScore);
+
+        // Auto-award any newly triggered achievement badges
+        List<String> badges = achievementEvaluatorService.evaluateAndAward(
+                userDetails.getUser(), wpm, accuracy, rawScore);
+        result.setAwardedBadges(badges);
 
         return ResponseEntity.ok(result);
     }

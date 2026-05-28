@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import '../../../css/TotalDashboard.css';
 import { API_BASE } from '../../../shared/api/client';
 import { authFetch } from '../../../shared/api/authFetch';
+import { getUserId } from '../../../shared/auth/JwtUtils';
+import { getAuthToken } from '../../../shared/auth/AuthUtils';
 
 const PersonalDashboard = () => {
   const [scores, setScores] = useState([]);
@@ -10,9 +12,21 @@ const PersonalDashboard = () => {
   const [highestWPM, setHighestWPM] = useState(0);
   const [lowestWPM, setLowestWPM] = useState(0);
   const [scoreDistribution, setScoreDistribution] = useState({});
+  const [lifetimeXp, setLifetimeXp] = useState(0);
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    const userId = getUserId(getAuthToken());
+    if (userId) {
+      authFetch(`${API_BASE}/api/user-statistics/user?userId=${userId}`)
+        .then(r => r.json())
+        .then(body => {
+          const stat = body?.value ?? (body?.userId != null ? body : null);
+          if (stat?.lifetimeXp != null) setLifetimeXp(stat.lifetimeXp);
+        })
+        .catch(() => {});
+    }
+
     authFetch(`${API_BASE}/api/scores`)
       .then(res => res.json())
       .then(data => {
@@ -79,6 +93,14 @@ const PersonalDashboard = () => {
     <div className="dashboard-container">
       <h2>📊 Personal Dashboard</h2>
       {error && <p style={{ color: 'red' }}>{error}</p>}
+
+      {/* === LIFETIME XP === */}
+      <div className="stats-grid" style={{ marginBottom: '32px' }}>
+        <div className="stat-card" style={{ background: 'linear-gradient(135deg,#1e3a5f,#0d1b2a)', color: '#ffd700', border: '2px solid #ffd700' }}>
+          <h3 style={{ color: '#ffd700' }}>Lifetime XP</h3>
+          <p style={{ fontSize: '2rem', fontWeight: 700, color: '#ffd700' }}>{lifetimeXp.toLocaleString()}</p>
+        </div>
+      </div>
 
       {/* === NORMAL TEST STATS === */}
       <h3>📝 Paragraph Typing Test Summary</h3>

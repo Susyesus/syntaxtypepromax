@@ -15,4 +15,5 @@ public class UserStatisticsDTO {
     private Integer totalErrors;
     private Integer totalTestsTaken;
     private Integer fastestClearTime;
+    private Long lifetimeXp;
 }

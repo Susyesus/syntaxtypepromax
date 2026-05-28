@@ -19,11 +19,11 @@ public class StudentAchievements {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long studentAchievementId;
 
-    @OneToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "student_id")
     private Student student;
 
-    @OneToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "achievement_id")
     private Achievements achievementId;
 

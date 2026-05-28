@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
     Box, Card, CardContent, Stack, Typography, Button, Chip, LinearProgress,
-    Alert, useTheme,
+    Alert, useTheme, IconButton, Tooltip,
 } from "@mui/material";
 import TerminalIcon from "@mui/icons-material/Terminal";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import FlashOnIcon from "@mui/icons-material/FlashOn";
 import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
+import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
+import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import { practiceBank, testBank, enemies } from "../data/translationPrompts";
 import { tokensEqual } from "../../../shared/utils/codeCompare";
 import ModePickerCard from "../../../shared/assessment/ModePickerCard";
@@ -23,7 +26,9 @@ import {
  * — only the prompt content differs.
  */
 
-const ROUND_SECONDS = 12;
+const ROUND_SECONDS = 20;
+const TUTORIAL_SEEN_KEY = "tt:tutorial_seen";
+const TUTORIAL_TOTAL = 4;
 
 function pickPromptForEnemy(bank, enemy, alreadyUsed) {
     const pool = bank.filter((p) => !alreadyUsed.includes(p.id));
@@ -40,7 +45,8 @@ export default function TranslationTerminal() {
     const theme = useTheme();
     const isDark = theme.palette.mode === "dark";
 
-    const [view, setView] = useState("mode"); // mode | picker | combat | victory | defeat
+    const [view, setView] = useState("mode"); // mode | tutorial | picker | combat | victory | defeat
+    const [tutorialStep, setTutorialStep] = useState(0);
     const [mode, setMode] = useState(null);
     const [enemyIdx, setEnemyIdx] = useState(0);
     const [enemyHp, setEnemyHp] = useState(0);
@@ -68,7 +74,25 @@ export default function TranslationTerminal() {
     const onPickMode = (m) => {
         if (!canStartMode(GAME.TRANSLATION, m)) return;
         setMode(m);
+        try {
+            if (!localStorage.getItem(TUTORIAL_SEEN_KEY)) {
+                setTutorialStep(0);
+                setView("tutorial");
+                return;
+            }
+        } catch {}
         setView("picker");
+    };
+
+    const finishTutorial = () => {
+        try { localStorage.setItem(TUTORIAL_SEEN_KEY, "1"); } catch {}
+        setTutorialStep(0);
+        setView("picker");
+    };
+
+    const openTutorial = () => {
+        setTutorialStep(0);
+        setView("tutorial");
     };
 
     const startCombat = (idx) => {
@@ -186,6 +210,214 @@ export default function TranslationTerminal() {
         }
     }, [view, mode, playerHp, promptsAnswered, promptsCorrect, enemy]);
 
+    // ─── Tutorial slides ──────────────────────────────────────────────────────
+    const renderTutorial = () => {
+        const mono = { fontFamily: "'JetBrains Mono', monospace" };
+        const codeBox = (text, accent) => (
+            <Box sx={{
+                ...mono, fontSize: "0.9rem", px: 1.5, py: 1,
+                bgcolor: isDark ? "#0F0F1E" : "#f4f4f8",
+                border: "1.5px solid", borderColor: accent || "divider",
+                borderRadius: 1, color: accent || "text.primary",
+            }}>
+                {text}
+            </Box>
+        );
+
+        const slides = [
+            // ── Slide 0: What is this ──
+            {
+                badge: "🗡️",
+                title: "What is Translation Terminal?",
+                body: (
+                    <Stack spacing={2}>
+                        <Typography>
+                            You're a programmer doing battle. Each enemy represents a C programming challenge.
+                            Defeat it by correctly writing C code from English descriptions before the timer runs out.
+                        </Typography>
+                        <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}>
+                            {enemies.map((e) => (
+                                <Chip
+                                    key={e.id}
+                                    label={`${e.emoji} ${e.name}`}
+                                    variant="outlined"
+                                    size="small"
+                                    sx={{ borderColor: e.color, color: e.color, fontWeight: 700 }}
+                                />
+                            ))}
+                        </Stack>
+                        <Typography variant="body2" color="text.secondary">
+                            Start with the Syntax Slime — it's the weakest.
+                            Work your way up to the Segfault Dragon.
+                        </Typography>
+                    </Stack>
+                ),
+            },
+            // ── Slide 1: How a round works ──
+            {
+                badge: "💡",
+                title: "How a round works",
+                body: (
+                    <Stack spacing={2}>
+                        <Typography>
+                            Each round shows an English description. Read it, type the exact C code, and press Enter to attack.
+                        </Typography>
+                        <Box sx={{ bgcolor: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.04)", borderRadius: 2, p: 2 }}>
+                            <Typography variant="overline" color="text.secondary">Prompt</Typography>
+                            <Typography variant="h6" sx={{ mt: 0.5 }}>
+                                Declare an integer named score and set it to 0.
+                            </Typography>
+                        </Box>
+                        {codeBox("int score = 0;", "#7BE093")}
+                        <Typography variant="caption" color="text.secondary">
+                            ↑ This is what you'd type. Then press Enter or click Attack.
+                        </Typography>
+                    </Stack>
+                ),
+            },
+            // ── Slide 2: Combat rules ──
+            {
+                badge: "⚔️",
+                title: "Combat rules",
+                body: (
+                    <Stack spacing={1.5}>
+                        {[
+                            {
+                                color: "#3ecf6a", bg: "rgba(62,207,106,0.08)",
+                                label: "✅ Correct answer",
+                                text: "You deal damage to the enemy. Chain 3+ correct in a row for a combo multiplier.",
+                            },
+                            {
+                                color: "#ef4444", bg: "rgba(239,68,68,0.08)",
+                                label: "❌ Wrong answer or timeout",
+                                text: `The enemy attacks you and your combo resets. You have ${ROUND_SECONDS} seconds per prompt.`,
+                            },
+                            {
+                                color: "#FFC700", bg: "rgba(255,199,0,0.08)",
+                                label: "⚡ Combo multiplier",
+                                text: "3 correct in a row = 2× damage · 6 in a row = 3× · 9 in a row = 4×",
+                            },
+                        ].map(({ color, bg, label, text }) => (
+                            <Box key={label} sx={{ p: 1.5, borderRadius: 1.5, bgcolor: bg, border: `1px solid ${color}` }}>
+                                <Typography variant="body2" sx={{ color, fontWeight: 700 }}>{label}</Typography>
+                                <Typography variant="body2" sx={{ mt: 0.5 }}>{text}</Typography>
+                            </Box>
+                        ))}
+                    </Stack>
+                ),
+            },
+            // ── Slide 3: Whitespace tips ──
+            {
+                badge: "📐",
+                title: "Whitespace tolerance & tips",
+                body: (
+                    <Stack spacing={2}>
+                        <Typography>
+                            Spacing around operators and after commas doesn't matter.
+                            Both of these are accepted for the same prompt:
+                        </Typography>
+                        <Stack spacing={1}>
+                            {codeBox("int score = 0;", undefined)}
+                            {codeBox("int score=0;", undefined)}
+                        </Stack>
+                        <Box sx={{ p: 1.5, bgcolor: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.04)", borderRadius: 1.5 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>Things that DO matter exactly:</Typography>
+                            <Typography variant="body2" component="ul" sx={{ pl: 2, m: 0 }}>
+                                <li>Semicolons — <Box component="span" sx={{ ...mono, color: "#FF6B6B" }}>int score = 0</Box> is wrong; the <Box component="span" sx={{ ...mono, color: "#7BE093" }}>;</Box> is required</li>
+                                <li>Variable names — spelled exactly as stated in the prompt</li>
+                                <li>Types and keywords — <Box component="span" sx={mono}>int</Box> vs <Box component="span" sx={mono}>float</Box> matters</li>
+                            </Typography>
+                        </Box>
+                        <Typography variant="body2" color="text.secondary">
+                            Tip: read carefully — the prompt names the type, variable name, and value precisely.
+                        </Typography>
+                    </Stack>
+                ),
+            },
+        ];
+
+        const slide = slides[tutorialStep];
+
+        return (
+            <Card>
+                <CardContent sx={{ p: { xs: 3, md: 4 } }}>
+                    {/* Header row */}
+                    <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 3 }}>
+                        <Stack direction="row" spacing={1.5} alignItems="center">
+                            <Typography sx={{ fontSize: "2rem", lineHeight: 1 }}>{slide.badge}</Typography>
+                            <Box>
+                                <Typography variant="overline" color="text.secondary">
+                                    Step {tutorialStep + 1} of {TUTORIAL_TOTAL}
+                                </Typography>
+                                <Typography variant="h5" sx={{ color: "text.primary", lineHeight: 1.2 }}>
+                                    {slide.title}
+                                </Typography>
+                            </Box>
+                        </Stack>
+                        <Button size="small" color="inherit" sx={{ color: "text.secondary" }} onClick={finishTutorial}>
+                            Skip tutorial
+                        </Button>
+                    </Stack>
+
+                    {/* Progress dots */}
+                    <Stack direction="row" spacing={0.75} sx={{ mb: 3 }}>
+                        {Array.from({ length: TUTORIAL_TOTAL }).map((_, i) => (
+                            <Box
+                                key={i}
+                                onClick={() => setTutorialStep(i)}
+                                sx={{
+                                    width: i === tutorialStep ? 24 : 8, height: 8,
+                                    borderRadius: 4,
+                                    bgcolor: i === tutorialStep ? "primary.main"
+                                        : i < tutorialStep ? "primary.light"
+                                            : isDark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.12)",
+                                    transition: "all 250ms",
+                                    cursor: i !== tutorialStep ? "pointer" : "default",
+                                }}
+                            />
+                        ))}
+                    </Stack>
+
+                    {/* Slide body */}
+                    <Box sx={{ minHeight: 220 }}>
+                        {slide.body}
+                    </Box>
+
+                    {/* Navigation */}
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 4 }}>
+                        <Button
+                            startIcon={<ArrowBackIcon />}
+                            onClick={() => setTutorialStep((s) => s - 1)}
+                            disabled={tutorialStep === 0}
+                            color="inherit"
+                            sx={{ color: "text.secondary" }}
+                        >
+                            Back
+                        </Button>
+                        {tutorialStep < TUTORIAL_TOTAL - 1 ? (
+                            <Button
+                                variant="contained"
+                                endIcon={<ArrowForwardIcon />}
+                                onClick={() => setTutorialStep((s) => s + 1)}
+                            >
+                                Next
+                            </Button>
+                        ) : (
+                            <Button
+                                variant="contained"
+                                color="primary"
+                                endIcon={<ArrowForwardIcon />}
+                                onClick={finishTutorial}
+                            >
+                                Pick your enemy →
+                            </Button>
+                        )}
+                    </Stack>
+                </CardContent>
+            </Card>
+        );
+    };
+
     const enemyHpPct = enemy ? (enemyHp / enemy.hp) * 100 : 0;
     const playerHpPct = (playerHp / playerMaxHp) * 100;
 
@@ -234,6 +466,8 @@ export default function TranslationTerminal() {
                     Read the prompt in English. Type the C syntax from memory before the timer runs out. Defeat the enemy.
                 </Typography>
 
+                {view === "tutorial" && renderTutorial()}
+
                 {view === "mode" && (
                     <ModePickerCard
                         game={GAME.TRANSLATION}
@@ -248,7 +482,14 @@ export default function TranslationTerminal() {
                         <CardContent>
                             <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
                                 <Typography variant="h6">Choose your enemy</Typography>
-                                <Button size="small" onClick={backToModePicker}>Change mode</Button>
+                                <Stack direction="row" spacing={1} alignItems="center">
+                                    <Tooltip title="How to play">
+                                        <IconButton size="small" onClick={openTutorial} sx={{ color: "text.secondary" }}>
+                                            <HelpOutlineIcon fontSize="small" />
+                                        </IconButton>
+                                    </Tooltip>
+                                    <Button size="small" onClick={backToModePicker}>Change mode</Button>
+                                </Stack>
                             </Stack>
                             <Stack
                                 direction="row" spacing={2}

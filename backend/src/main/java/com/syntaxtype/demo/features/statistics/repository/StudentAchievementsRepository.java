@@ -12,4 +12,5 @@ public interface StudentAchievementsRepository extends JpaRepository<StudentAchi
     List<StudentAchievements> findByStudent(Student student);
     List<StudentAchievements> findByAchievementId(Achievements achievementId);
     List<StudentAchievements> findByAwardedAt(LocalDateTime awardedAt);
+    Optional<StudentAchievements> findByStudentAndAchievementId(Student student, Achievements achievementId);
 }

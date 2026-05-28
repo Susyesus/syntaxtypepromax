@@ -53,10 +53,14 @@ const PB_PREFIX = "fall:best:";
 const LINE_PHASE_START = 0.4;
 const LINE_CHANCE_MAX = 0.35;
 const LINE_CHANCE_GROWTH = 0.7;
-// Lines are long — they fall slower so they remain catchable.
 const LINE_FALL_MUL = 0.55;
-// Overall fall rate scales modestly with elapsed time as a general ramp.
 const DIFFICULTY_FALL_RAMP = 0.5;
+// Keyword suppression: once line phase begins, keyword spawn probability shrinks
+// linearly, reaching MAX_KEYWORD_SUPPRESSION (85%) at round end so the screen
+// isn't cluttered with keywords while code lines and sequence blocks are active.
+const MAX_KEYWORD_SUPPRESSION = 0.85;
+// Sequence blocks start dropping after SEQ_PHASE_START fraction of the round.
+const SEQ_PHASE_START = 0.65;
 
 // Built-in code-line pool. Used when a challenge doesn't define its own lines.
 const DEFAULT_CODE_LINES = [
@@ -127,6 +131,7 @@ const FallingTypingTest = () => {
     const [currentInput, setCurrentInput] = useState("");
     const [bugPhaseAlert, setBugPhaseAlert] = useState(false);
     const [linePhaseAlert, setLinePhaseAlert] = useState(false);
+    const [seqPhaseAlert, setSeqPhaseAlert] = useState(false);
     const [activeWordId, setActiveWordId] = useState(null);
     const [flash, setFlash] = useState(null); // { color, expiresAt }
 
@@ -151,6 +156,9 @@ const FallingTypingTest = () => {
     const wrongWordsTypedRef = useRef(0);
     const bugPhaseStartedRef = useRef(false);
     const linePhaseStartedRef = useRef(false);
+    const seqPhaseStartedRef = useRef(false);
+    // groupId → next expected seqOrder (0-based). Cleaned up per frame.
+    const sequenceProgressRef = useRef({});
     const linesCaughtRef = useRef(0);
     const linesMissedRef = useRef(0);
     const streakRef = useRef(0);
@@ -243,25 +251,19 @@ const FallingTypingTest = () => {
         const challengeLines = (c.codeLines || c.lines || [])
             .map((l) => String(l).trim())
             .filter(Boolean);
+        const normPair = (w) => {
+            if (typeof w === "string") { const s = w.trim(); return s ? { buggy: s, correct: s } : null; }
+            if (w && w.buggy && w.correct) return { buggy: String(w.buggy).trim(), correct: String(w.correct).trim() };
+            return null;
+        };
         wordPoolsRef.current = {
             correct: (c.words || []).map((w) => String(w).trim()).filter(Boolean),
-            // Normalize wrong entries to { buggy, correct }. Legacy string entries
-            // (from backend Challenge.wrongWords) fall back to buggy === correct so
-            // the spawn keeps working until teachers can author paired fixes.
-            wrong: (c.wrongWords || [])
-                .map((w) => {
-                    if (typeof w === "string") {
-                        const s = w.trim();
-                        return s ? { buggy: s, correct: s } : null;
-                    }
-                    if (w && w.buggy && w.correct) {
-                        return { buggy: String(w.buggy).trim(), correct: String(w.correct).trim() };
-                    }
-                    return null;
-                })
-                .filter(Boolean),
-            // Full lines of code that start dropping after LINE_PHASE_START of the round.
-            lines: challengeLines.length > 0 ? challengeLines : DEFAULT_CODE_LINES,
+            wrong:   (c.wrongWords || []).map(normPair).filter(Boolean),
+            lines:   challengeLines.length > 0 ? challengeLines : DEFAULT_CODE_LINES,
+            // Full-line bug pairs: { buggy, correct } where both are complete C statements.
+            buggyLines: (c.buggyLines || []).map(normPair).filter(Boolean),
+            // Sequence blocks: arrays of 2–3 lines that must be typed in execution order.
+            sequenceBlocks: (c.sequenceBlocks || []).filter((b) => Array.isArray(b) && b.length >= 2),
         };
 
         setPersonalBest(loadPB(c.challengeId || c.id));
@@ -322,6 +324,9 @@ const FallingTypingTest = () => {
         setBugPhaseAlert(false);
         linePhaseStartedRef.current = false;
         setLinePhaseAlert(false);
+        seqPhaseStartedRef.current = false;
+        setSeqPhaseAlert(false);
+        sequenceProgressRef.current = {};
         linesCaughtRef.current = 0;
         linesMissedRef.current = 0;
         streakRef.current = 0;
@@ -405,8 +410,7 @@ const FallingTypingTest = () => {
 
     const trySpawn = () => {
         const pools = wordPoolsRef.current;
-        const totalPool = pools.correct.length + pools.wrong.length;
-        if (totalPool === 0) return;
+        if ((pools.correct.length + pools.wrong.length) === 0) return;
 
         const caught = wordsCaughtRef.current;
         const bugPhaseUnlocked = caught >= BUG_PHASE_THRESHOLD;
@@ -414,23 +418,16 @@ const FallingTypingTest = () => {
             ? Math.min(0.30, 0.15 + (caught - BUG_PHASE_THRESHOLD) * 0.008)
             : 0;
 
-        // Trigger the "Bugs incoming!" warning the first time we cross the threshold.
         if (bugPhaseUnlocked && !bugPhaseStartedRef.current && pools.wrong.length > 0) {
             bugPhaseStartedRef.current = true;
             setBugPhaseAlert(true);
             setTimeout(() => setBugPhaseAlert(false), 2500);
         }
 
-        // Line phase: as the round progresses, occasionally drop full code lines.
-        // Chance starts at 0 until LINE_PHASE_START is reached, then climbs toward
-        // LINE_CHANCE_MAX by the end. Only one line in the air at a time so the
-        // play area never gets visually swamped.
         const progress = getProgress();
         const linesAvailable = (pools.lines || []).length > 0;
-        const lineInFlight = fallingWordsRef.current.some((w) => w.isLine);
-        const lineChance = (linesAvailable && progress >= LINE_PHASE_START && !lineInFlight)
-            ? Math.min(LINE_CHANCE_MAX, (progress - LINE_PHASE_START) * LINE_CHANCE_GROWTH)
-            : 0;
+        // Any line (solo or grouped) already in flight?
+        const anyLineInFlight = fallingWordsRef.current.some((w) => w.isLine);
 
         if (linesAvailable && progress >= LINE_PHASE_START && !linePhaseStartedRef.current) {
             linePhaseStartedRef.current = true;
@@ -438,61 +435,110 @@ const FallingTypingTest = () => {
             setTimeout(() => setLinePhaseAlert(false), 2500);
         }
 
-        const useLine = Math.random() < lineChance;
+        const lineChance = (linesAvailable && progress >= LINE_PHASE_START && !anyLineInFlight)
+            ? Math.min(LINE_CHANCE_MAX, (progress - LINE_PHASE_START) * LINE_CHANCE_GROWTH)
+            : 0;
 
-        if (useLine) {
-            const line = pools.lines[Math.floor(Math.random() * pools.lines.length)];
-            // Lines are pinned to x=50% and the only thing that meaningfully clashes
-            // with them is another line — that's already prevented by `lineInFlight`
-            // above. We only need to ensure the very top entry row is clear so the
-            // newborn line isn't drawn through an existing word's glyphs.
-            const tooClose = fallingWordsRef.current.some((w) => w.y < 6 && Math.abs(w.x - 50) < 30);
-            if (tooClose) return;
-            const newLine = {
-                id: wordIdCounter.current++,
-                text: line,
-                expected: line,
-                x: 50,
-                y: 0,
-                isCorrect: true,
-                isLine: true,
-            };
-            fallingWordsRef.current = [...fallingWordsRef.current, newLine];
+        if (Math.random() < lineChance) {
+            // ── Line / sequence block spawn ───────────────────────────────────
+            const seqAvailable = (pools.sequenceBlocks || []).length > 0;
+            const seqChance = seqAvailable && progress >= SEQ_PHASE_START
+                ? Math.min(0.45, ((progress - SEQ_PHASE_START) / (1 - SEQ_PHASE_START)) * 0.45)
+                : 0;
+
+            if (Math.random() < seqChance) {
+                // ── Sequence block ────────────────────────────────────────────
+                const tooClose = fallingWordsRef.current.some((w) => w.y < 6);
+                if (tooClose) return;
+
+                const block = pools.sequenceBlocks[
+                    Math.floor(Math.random() * pools.sequenceBlocks.length)
+                ];
+                const n = Math.min(block.length, 3);
+                const xPos = n === 2 ? [28, 72] : [18, 50, 82];
+                const groupId = `g${wordIdCounter.current}`;
+
+                const newLines = block.slice(0, n).map((line, i) => ({
+                    id:       wordIdCounter.current++,
+                    text:     typeof line === "string" ? line : line.buggy,
+                    expected: typeof line === "string" ? line : line.correct,
+                    x:        xPos[i],
+                    y:        0,
+                    isCorrect: typeof line === "string",
+                    isLine:   true,
+                    groupId,
+                    seqOrder: i,
+                    seqTotal: n,
+                }));
+
+                sequenceProgressRef.current[groupId] = 0;
+
+                if (!seqPhaseStartedRef.current) {
+                    seqPhaseStartedRef.current = true;
+                    setSeqPhaseAlert(true);
+                    setTimeout(() => setSeqPhaseAlert(false), 3000);
+                }
+
+                fallingWordsRef.current = [...fallingWordsRef.current, ...newLines];
+                return;
+            }
+
+            // ── Single line (possibly buggy) ──────────────────────────────────
+            const useBuggyLine = bugPhaseUnlocked &&
+                (pools.buggyLines || []).length > 0 &&
+                Math.random() < 0.30;
+
+            let lineText, lineExpected, lineIsCorrect;
+            if (useBuggyLine) {
+                const entry = pools.buggyLines[Math.floor(Math.random() * pools.buggyLines.length)];
+                lineText = entry.buggy; lineExpected = entry.correct; lineIsCorrect = false;
+            } else {
+                const ln = pools.lines[Math.floor(Math.random() * pools.lines.length)];
+                lineText = ln; lineExpected = ln; lineIsCorrect = true;
+            }
+
+            const tooCloseLine = fallingWordsRef.current.some(
+                (w) => w.y < 6 && Math.abs(w.x - 50) < 30
+            );
+            if (tooCloseLine) return;
+
+            fallingWordsRef.current = [
+                ...fallingWordsRef.current,
+                { id: wordIdCounter.current++, text: lineText, expected: lineExpected,
+                  x: 50, y: 0, isCorrect: lineIsCorrect, isLine: true },
+            ];
             return;
+        }
+
+        // ── Keyword / bug-word spawn ──────────────────────────────────────────
+        // During the line phase, progressively suppress keyword spawns so the
+        // screen stays readable while lines and sequence blocks are active.
+        if (progress >= LINE_PHASE_START) {
+            const linePhaseProgress = (progress - LINE_PHASE_START) / (1 - LINE_PHASE_START);
+            if (Math.random() < linePhaseProgress * MAX_KEYWORD_SUPPRESSION) return;
         }
 
         const useWrong = pools.wrong.length > 0 && Math.random() < wrongChance;
         const pool = useWrong ? pools.wrong : pools.correct;
         if (pool.length === 0) return;
         const entry = pool[Math.floor(Math.random() * pool.length)];
-        // For correct words: entry is a string and the student types it as shown.
-        // For bug words: entry is { buggy, correct } — display the buggy form, expect the fix.
-        const display = useWrong ? entry.buggy : entry;
+        const display  = useWrong ? entry.buggy : entry;
         const expected = useWrong ? entry.correct : entry;
 
-        // Avoid overlap: pick an x band not occupied near the top.
         let x;
         for (let attempt = 0; attempt < 6; attempt++) {
-            const candidate = Math.random() * 80 + 5; // 5–85% so words don't clip
+            const candidate = Math.random() * 80 + 5;
             const tooClose = fallingWordsRef.current.some(
                 (w) => w.y < 18 && Math.abs(w.x - candidate) < 14
             );
-            if (!tooClose) {
-                x = candidate;
-                break;
-            }
+            if (!tooClose) { x = candidate; break; }
         }
-        if (x === undefined) return; // skip this spawn rather than overlap
+        if (x === undefined) return;
 
-        const newWord = {
-            id: wordIdCounter.current++,
-            text: display,
-            expected,
-            x,
-            y: 0,
-            isCorrect: !useWrong,
-        };
-        fallingWordsRef.current = [...fallingWordsRef.current, newWord];
+        fallingWordsRef.current = [
+            ...fallingWordsRef.current,
+            { id: wordIdCounter.current++, text: display, expected, x, y: 0, isCorrect: !useWrong },
+        ];
     };
 
     // ─── Catch / penalize ─────────────────────────────────────────────────────
@@ -513,7 +559,13 @@ const FallingTypingTest = () => {
         setScore((s) => s + points);
         wordsCaughtRef.current += 1;
         if (word.isLine) linesCaughtRef.current += 1;
-        if (!word.isCorrect) wrongWordsTypedRef.current += 1; // counts as a bug squashed
+        if (!word.isCorrect) wrongWordsTypedRef.current += 1;
+        // Advance this group's sequence so the next line becomes interactive.
+        if (word.groupId != null) {
+            const next = (sequenceProgressRef.current[word.groupId] ?? 0) + 1;
+            if (next >= word.seqTotal) delete sequenceProgressRef.current[word.groupId];
+            else sequenceProgressRef.current[word.groupId] = next;
+        }
         streakRef.current += 1;
         setStreak(streakRef.current);
         if (streakRef.current > bestStreakRef.current) {
@@ -573,12 +625,17 @@ const FallingTypingTest = () => {
             const newChar = value[value.length - 1];
             totalCharsRef.current += 1;
 
-            // Find a falling word whose EXPECTED text (what the player needs to type)
-            // starts with the current input. For bug words, expected !== text — the
-            // player types the fix, not the buggy form on screen.
-            const match = fallingWordsRef.current.find((w) =>
-                (w.expected || w.text).startsWith(value)
-            );
+            // Find a falling word whose EXPECTED text starts with the current input.
+            // Sequenced lines are only matchable when it's their turn.
+            const match = fallingWordsRef.current.find((w) => {
+                const target = w.expected || w.text;
+                if (!target.startsWith(value)) return false;
+                if (w.groupId != null) {
+                    const nextOrder = sequenceProgressRef.current[w.groupId] ?? 0;
+                    if (w.seqOrder !== nextOrder) return false;
+                }
+                return true;
+            });
             if (match) {
                 const target = match.expected || match.text;
                 const expectedChar = target[value.length - 1];
@@ -685,6 +742,12 @@ const FallingTypingTest = () => {
                     }
                     updated.push({ ...w, y: newY });
                 }
+                // Remove sequence-progress entries whose groups are no longer in flight.
+                const activeGroups = new Set(updated.filter(w => w.groupId).map(w => w.groupId));
+                Object.keys(sequenceProgressRef.current).forEach(gid => {
+                    if (!activeGroups.has(gid)) delete sequenceProgressRef.current[gid];
+                });
+
                 fallingWordsRef.current = updated;
                 setFallingWords(updated);
                 if (livesLostThisFrame > 0) {
@@ -743,9 +806,37 @@ const FallingTypingTest = () => {
     };
 
     // ─── Render: word in game area ────────────────────────────────────────────
+    const SEQ_BADGES = ["①", "②", "③"];
+
     const renderWord = (w) => {
         const isActive = w.id === activeWordId;
-        const baseColor = w.isLine ? "#A78BFA" : w.isCorrect ? "#FFC700" : "#FF6B6B";
+
+        // For sequenced lines, determine locked state by reading the progress ref.
+        const isLocked = w.groupId != null &&
+            w.seqOrder !== (sequenceProgressRef.current[w.groupId] ?? 0);
+
+        // Color logic:
+        //   locked sequence line  → dimmed gray
+        //   buggy line            → red (like buggy keywords)
+        //   active sequence line  → gold
+        //   normal line           → purple
+        //   correct keyword       → gold
+        //   buggy keyword         → red
+        let baseColor;
+        if (isLocked) {
+            baseColor = "rgba(150,150,160,0.45)";
+        } else if (w.isLine && !w.isCorrect) {
+            baseColor = "#FF6B6B";
+        } else if (w.isLine && w.groupId) {
+            baseColor = "#FFD166";
+        } else if (w.isLine) {
+            baseColor = "#A78BFA";
+        } else if (w.isCorrect) {
+            baseColor = "#FFC700";
+        } else {
+            baseColor = "#FF6B6B";
+        }
+
         return (
             <Box
                 key={w.id}
@@ -756,21 +847,35 @@ const FallingTypingTest = () => {
                     transform: "translate(-50%, -50%)",
                     fontFamily: '"JetBrains Mono", monospace',
                     fontSize: w.isLine
-                        ? { xs: "0.85rem", md: "1rem" }
+                        ? { xs: "0.82rem", md: "0.97rem" }
                         : { xs: "1rem", md: "1.2rem" },
                     fontWeight: w.isLine ? 700 : w.isCorrect ? 600 : 800,
                     color: baseColor,
-                    textShadow: w.isLine
-                        ? "0 0 14px rgba(167,139,250,0.7), 0 2px 6px rgba(0,0,0,0.7)"
-                        : w.isCorrect
-                            ? "0 2px 8px rgba(0,0,0,0.7)"
-                            : "0 0 12px rgba(255, 107, 107, 0.8), 0 2px 6px rgba(0,0,0,0.7)",
+                    opacity: isLocked ? 0.55 : 1,
+                    textShadow: isLocked
+                        ? "none"
+                        : w.isLine && !w.isCorrect
+                            ? "0 0 12px rgba(255,107,107,0.7), 0 2px 6px rgba(0,0,0,0.7)"
+                            : w.isLine
+                                ? "0 0 14px rgba(167,139,250,0.6), 0 2px 6px rgba(0,0,0,0.7)"
+                                : w.isCorrect
+                                    ? "0 2px 8px rgba(0,0,0,0.7)"
+                                    : "0 0 12px rgba(255,107,107,0.8), 0 2px 6px rgba(0,0,0,0.7)",
                     whiteSpace: "nowrap",
                     pointerEvents: "none",
-                    transition: "transform 80ms",
+                    transition: "opacity 200ms, color 200ms",
                     ...(w.isLine && {
-                        bgcolor: "rgba(167,139,250,0.12)",
-                        border: "1.5px dashed rgba(167,139,250,0.55)",
+                        position: "absolute",
+                        bgcolor: isLocked
+                            ? "rgba(80,80,90,0.18)"
+                            : w.isCorrect
+                                ? (w.groupId ? "rgba(255,209,102,0.1)" : "rgba(167,139,250,0.12)")
+                                : "rgba(255,107,107,0.12)",
+                        border: isLocked
+                            ? "1.5px dashed rgba(150,150,160,0.3)"
+                            : w.isCorrect
+                                ? (w.groupId ? "1.5px solid rgba(255,209,102,0.55)" : "1.5px dashed rgba(167,139,250,0.55)")
+                                : "1.5px dashed rgba(255,107,107,0.6)",
                         borderRadius: 1,
                         px: 1,
                         py: 0.5,
@@ -785,6 +890,26 @@ const FallingTypingTest = () => {
                     }),
                 }}
             >
+                {/* Sequence order badge */}
+                {w.seqTotal != null && (
+                    <Box
+                        component="span"
+                        sx={{
+                            position: "absolute",
+                            top: -10,
+                            right: -4,
+                            fontSize: "0.72rem",
+                            fontFamily: "sans-serif",
+                            color: isLocked ? "rgba(150,150,160,0.5)" : "#FFD166",
+                            textShadow: "none",
+                            userSelect: "none",
+                        }}
+                    >
+                        {SEQ_BADGES[w.seqOrder] ?? `(${w.seqOrder + 1})`}
+                    </Box>
+                )}
+
+                {/* Character-by-character highlight when this word is active */}
                 {isActive
                     ? (w.expected || w.text).split("").map((ch, i) => (
                           <Box
@@ -1094,6 +1219,43 @@ const FallingTypingTest = () => {
                         📜 LINES INCOMING!
                         <Box sx={{ fontSize: "0.9rem", fontWeight: 400, mt: 0.5 }}>
                             Full lines of code now drop — type them all to clear, double life cost if missed
+                        </Box>
+                    </Box>
+                )}
+
+                {/* Sequence block phase alert */}
+                {seqPhaseAlert && (
+                    <Box
+                        sx={{
+                            position: "absolute",
+                            top: "30%",
+                            left: "50%",
+                            transform: "translate(-50%, -50%)",
+                            px: 4,
+                            py: 2,
+                            borderRadius: 2,
+                            bgcolor: "rgba(255,209,102,0.92)",
+                            color: "#1a1a2e",
+                            fontFamily: '"Pixelify Sans", sans-serif',
+                            fontSize: "2rem",
+                            fontWeight: 800,
+                            textAlign: "center",
+                            boxShadow: "0 0 24px rgba(255,209,102,0.7)",
+                            pointerEvents: "none",
+                            animation: "fp-seq-warn 3000ms ease-out forwards",
+                            "@keyframes fp-seq-warn": {
+                                "0%":   { opacity: 0, transform: "translate(-50%, -50%) scale(0.6)" },
+                                "15%":  { opacity: 1, transform: "translate(-50%, -50%) scale(1.1)" },
+                                "30%":  { transform: "translate(-50%, -50%) scale(1)" },
+                                "85%":  { opacity: 1 },
+                                "100%": { opacity: 0 },
+                            },
+                            zIndex: 10,
+                        }}
+                    >
+                        ①②③ SEQUENCE DROP!
+                        <Box sx={{ fontSize: "0.9rem", fontWeight: 400, mt: 0.5 }}>
+                            Multiple lines — type them in order ①②③ to clear
                         </Box>
                     </Box>
                 )}

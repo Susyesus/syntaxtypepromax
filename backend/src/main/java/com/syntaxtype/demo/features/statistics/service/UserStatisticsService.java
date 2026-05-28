@@ -181,6 +181,7 @@ public class UserStatisticsService {
                 .totalErrors(userStatistics.getTotalErrors())
                 .totalTestsTaken(userStatistics.getTotalTestsTaken())
                 .fastestClearTime(userStatistics.getFastestClearTime())
+                .lifetimeXp(userStatistics.getLifetimeXp())
                 .build();
     }
 
@@ -195,7 +196,36 @@ public class UserStatisticsService {
         us.setTotalErrors(dto.getTotalErrors());
         us.setTotalTestsTaken(dto.getTotalTestsTaken());
         us.setFastestClearTime(dto.getFastestClearTime());
+        us.setLifetimeXp(dto.getLifetimeXp() != null ? dto.getLifetimeXp() : 0L);
         return us;
+    }
+
+    /**
+     * Increments lifetimeXp for the given user by {@code amount}.
+     * Creates a UserStatistics record with zero defaults if one does not exist yet.
+     */
+    public void addLifetimeXp(User user, int amount) {
+        if (user == null || amount <= 0) return;
+        Optional<UserStatistics> statsOpt = userStatisticsRepository.findByUser(user);
+        UserStatistics stats;
+        if (statsOpt.isPresent()) {
+            stats = statsOpt.get();
+        } else {
+            stats = UserStatistics.builder()
+                    .user(user)
+                    .wordsPerMinute(0)
+                    .accuracy(0)
+                    .totalWordsTyped(0)
+                    .totalTimeSpent(0)
+                    .totalErrors(0)
+                    .totalTestsTaken(0)
+                    .fastestClearTime(0)
+                    .lifetimeXp(0L)
+                    .build();
+        }
+        long current = stats.getLifetimeXp() != null ? stats.getLifetimeXp() : 0L;
+        stats.setLifetimeXp(current + amount);
+        userStatisticsRepository.save(stats);
     }
 
     public UserStatisticsDTO getStatisticsForUserAndLesson(Long userId, Long lessonId) {

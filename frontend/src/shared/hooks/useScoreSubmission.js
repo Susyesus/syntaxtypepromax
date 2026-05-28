@@ -35,12 +35,14 @@ export const useScoreSubmission = () => {
 
       const data = await response.json();
       setSubmitSuccess(true);
-      let message = 'Score submitted!';
-      if (data.isNewBest) message = 'New best score!';
-      if (data.rank) message += ` Your rank is #${data.rank}.`;
+      let message = data.isNewBest ? 'New best score!' : 'Score submitted!';
+      if (data.rank) message += ` Rank #${data.rank}.`;
+      if (data.awardedBadges && data.awardedBadges.length > 0) {
+        message += ` Badge${data.awardedBadges.length > 1 ? 's' : ''} unlocked: ${data.awardedBadges.join(', ')}!`;
+      }
       setSubmitMessage(message);
       setSnackbarOpen(true);
-      return true;
+      return data;
     } catch (err) {
       setSubmitSuccess(false);
       setSubmitMessage('Failed to submit score');

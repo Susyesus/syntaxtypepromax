@@ -29,4 +29,8 @@ public class UserStatistics {
     private Integer totalErrors;
     private Integer totalTestsTaken;
     private Integer fastestClearTime;
+
+    @Builder.Default
+    @Column(name = "lifetime_xp")
+    private Long lifetimeXp = 0L;
 }

@@ -32,6 +32,7 @@ import TimerIcon from '@mui/icons-material/Timer';
 import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import DownloadIcon from '@mui/icons-material/Download';
 import { authFetch } from '../../../shared/api/authFetch';
 import { API_BASE } from '../../../shared/api/client';
 
@@ -110,6 +111,22 @@ const TeacherClassDashboard = () => {
         fetchRoster();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    const exportCsv = async () => {
+        try {
+            const res = await authFetch(`${API_BASE}/api/analytics/students.csv`);
+            if (!res.ok) { alert('Export failed. Make sure you are signed in as a teacher.'); return; }
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'students_analytics.csv';
+            a.click();
+            window.URL.revokeObjectURL(url);
+        } catch {
+            alert('Export failed.');
+        }
+    };
 
     const rows = useMemo(() => {
         const built = students.map((s) => {
@@ -217,11 +234,23 @@ const TeacherClassDashboard = () => {
                             Real-time view of every student's typing progress.
                         </Typography>
                     </Box>
-                    <Tooltip title="Refresh">
-                        <IconButton onClick={fetchRoster} sx={{ border: '1.5px solid', borderColor: 'primary.main', color: 'primary.main' }}>
-                            <RefreshIcon />
-                        </IconButton>
-                    </Tooltip>
+                    <Stack direction="row" spacing={1}>
+                        <Tooltip title="Refresh">
+                            <IconButton onClick={fetchRoster} sx={{ border: '1.5px solid', borderColor: 'primary.main', color: 'primary.main' }}>
+                                <RefreshIcon />
+                            </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Export CSV">
+                            <Button
+                                variant="outlined"
+                                startIcon={<DownloadIcon />}
+                                onClick={exportCsv}
+                                sx={{ borderColor: 'primary.main', color: 'primary.main', textTransform: 'none' }}
+                            >
+                                Export CSV
+                            </Button>
+                        </Tooltip>
+                    </Stack>
                 </Stack>
 
                 {/* Stat Grid */}
