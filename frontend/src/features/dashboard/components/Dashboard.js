@@ -28,9 +28,24 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import PendingIcon from '@mui/icons-material/Pending';
 import { getAuthToken } from '../../../shared/auth/AuthUtils';
-import { getUserRole } from '../../../shared/auth/JwtUtils';
+import { getUserRole, getUserId } from '../../../shared/auth/JwtUtils';
 import { authFetch } from '../../../shared/api/authFetch';
 import { API_BASE } from '../../../shared/api/client';
+
+const CHALLENGE_LABELS = {
+    FALLING_WORDS: 'Falling Code',
+    TYPING_TESTS: 'Typing Test',
+    GALAXY: 'Galaxy Challenge',
+    SYNTAX_SAVER: 'Syntax Saver',
+    GRID: 'Grid Game',
+    BOOKWORM: 'Bookworm',
+    CODE_CHALLENGES: 'Code Challenge',
+    TRANSLATION_TERMINAL: 'Translation Terminal',
+    normal: 'Typing Test',
+    falling: 'Falling Code',
+};
+const labelForType = (t) => (t ? (CHALLENGE_LABELS[t] || t) : 'Game Session');
+const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString(); } catch { return ''; } };
 
 const gradientText = {
     background: 'linear-gradient(90deg, #C8456D 0%, #E78AAC 50%, #FFC700 100%)',
@@ -63,20 +78,26 @@ const Dashboard = () => {
     const userName = localStorage.getItem('userName') || 'Player';
 
     const [classStats, setClassStats] = useState(null);
+    const [studentStats, setStudentStats] = useState(null);   // { wpm, accuracy, totalTestsTaken, totalLessons }
+    const [recentActivities, setRecentActivities] = useState([]);
 
+    // ── Teacher / Admin: fetch class-wide aggregates ──────────────────────────
     useEffect(() => {
         if (userRole !== 'TEACHER' && userRole !== 'ADMIN') return;
         let cancelled = false;
         (async () => {
             try {
-                const [sRes, lRes] = await Promise.all([
+                const [sRes, lRes, tRes] = await Promise.all([
                     authFetch(`${API_BASE}/api/students`),
                     authFetch(`${API_BASE}/api/lessons`),
+                    authFetch(`${API_BASE}/api/teachers`),
                 ]);
                 const students = sRes.ok ? await sRes.json() : [];
-                const lessons = lRes.ok ? await lRes.json() : [];
+                const lessons  = lRes.ok ? await lRes.json() : [];
+                const teachers = tRes.ok ? await tRes.json() : [];
                 const list = Array.isArray(students) ? students : [];
                 const lessonCount = Array.isArray(lessons) ? lessons.length : 0;
+                const teacherCount = Array.isArray(teachers) ? teachers.length : 0;
                 const userIds = list.map((s) => s.user?.userId).filter((id) => id != null);
 
                 const statEntries = await Promise.all(
@@ -85,10 +106,8 @@ const Dashboard = () => {
                             const r = await authFetch(`${API_BASE}/api/user-statistics/user?userId=${uid}`);
                             if (!r.ok) return null;
                             const body = await r.json();
-                            return body && body.value ? body.value : body && body.userId != null ? body : null;
-                        } catch {
-                            return null;
-                        }
+                            return body?.value ?? (body?.userId != null ? body : null);
+                        } catch { return null; }
                     })
                 );
 
@@ -99,34 +118,95 @@ const Dashboard = () => {
                 if (!cancelled) {
                     setClassStats({
                         totalStudents: list.length,
+                        totalTeachers: teacherCount,
                         totalLessons: lessonCount,
                         averageWPM: avg('wordsPerMinute'),
                         accuracy: avg('accuracy'),
                     });
+                    // Recent activity for staff: last 3 lessons authored
+                    const lessonArr = Array.isArray(lessons) ? lessons : [];
+                    setRecentActivities(
+                        lessonArr.slice(-3).reverse().map((l) => ({
+                            id: l.lessonId,
+                            title: l.title || 'Untitled lesson',
+                            date: '',
+                            status: 'completed',
+                        }))
+                    );
                 }
             } catch {
                 // leave classStats null → cards show 0
             }
         })();
-        return () => {
-            cancelled = true;
-        };
+        return () => { cancelled = true; };
+    }, [userRole]);
+
+    // ── Student: fetch personal stats + recent scores ─────────────────────────
+    useEffect(() => {
+        if (userRole !== 'STUDENT' && userRole !== 'USER') return;
+        let cancelled = false;
+        const userId = getUserId(getAuthToken());
+        (async () => {
+            try {
+                const [statsRes, scoresRes, lessonsRes] = await Promise.all([
+                    userId ? authFetch(`${API_BASE}/api/user-statistics/user?userId=${userId}`) : Promise.resolve(null),
+                    authFetch(`${API_BASE}/api/scores`),
+                    authFetch(`${API_BASE}/api/lessons`),
+                ]);
+
+                if (cancelled) return;
+
+                const statsBody = statsRes?.ok ? await statsRes.json() : null;
+                const stat = statsBody?.value ?? (statsBody?.userId != null ? statsBody : null);
+
+                const scores = scoresRes?.ok ? await scoresRes.json() : [];
+                const scoreArr = Array.isArray(scores) ? scores : [];
+
+                const lessons = lessonsRes?.ok ? await lessonsRes.json() : [];
+                const lessonCount = Array.isArray(lessons) ? lessons.length : 0;
+
+                if (!cancelled) {
+                    setStudentStats({
+                        wpm:             stat?.wordsPerMinute  ?? 0,
+                        accuracy:        stat?.accuracy        ?? 0,
+                        totalTestsTaken: stat?.totalTestsTaken ?? 0,
+                        totalLessons:    lessonCount,
+                    });
+
+                    // Recent activity: last 3 score entries, newest first
+                    const sorted = [...scoreArr].sort(
+                        (a, b) => new Date(b.submittedAt) - new Date(a.submittedAt)
+                    );
+                    setRecentActivities(
+                        sorted.slice(0, 3).map((s) => ({
+                            id: s.id,
+                            title: labelForType(s.challengeType),
+                            date: fmtDate(s.submittedAt),
+                            score: s.score,
+                            status: s.score > 0 ? 'completed' : 'in-progress',
+                        }))
+                    );
+                }
+            } catch {
+                // leave defaults
+            }
+        })();
+        return () => { cancelled = true; };
     }, [userRole]);
 
     const stats = {
-        totalLessons: classStats?.totalLessons ?? 12,
-        completedLessons: 8,
-        averageWPM: classStats?.averageWPM ?? 0,
-        accuracy: classStats?.accuracy ?? 0,
-        totalStudents: classStats?.totalStudents ?? 0,
-        totalTeachers: 0,
+        // teacher / admin
+        totalLessons:   classStats?.totalLessons   ?? 0,
+        averageWPM:     classStats?.averageWPM     ?? 0,
+        accuracy:       classStats?.accuracy       ?? 0,
+        totalStudents:  classStats?.totalStudents  ?? 0,
+        totalTeachers:  classStats?.totalTeachers  ?? 0,
+        // student
+        studentWpm:           studentStats?.wpm             ?? 0,
+        studentAccuracy:      studentStats?.accuracy        ?? 0,
+        studentGamesPlayed:   studentStats?.totalTestsTaken ?? 0,
+        studentTotalLessons:  studentStats?.totalLessons    ?? 0,
     };
-
-    const recentActivities = [
-        { id: 1, title: 'Basic Typing Fundamentals', date: '2024-01-15', status: 'completed' },
-        { id: 2, title: 'Speed Test Challenge', date: '2024-01-14', status: 'in-progress' },
-        { id: 3, title: 'Advanced Key Combinations', date: '2024-01-13', status: 'pending' },
-    ];
 
     const statCards = useMemo(() => {
         if (userRole === 'ADMIN') {
@@ -145,13 +225,15 @@ const Dashboard = () => {
                 { label: 'Class Accuracy', value: `${stats.accuracy}%`, icon: <CenterFocusStrongIcon />, accent: '#9B2E54' },
             ];
         }
+        // Student — all real values from user-statistics
         return [
-            { label: 'Lessons Done', value: `${stats.completedLessons}/${stats.totalLessons}`, icon: <MenuBookIcon />, accent: '#C8456D' },
-            { label: 'Average WPM', value: stats.averageWPM, icon: <BoltIcon />, accent: '#FFC700' },
-            { label: 'Accuracy', value: `${stats.accuracy}%`, icon: <CenterFocusStrongIcon />, accent: '#E78AAC' },
-            { label: 'Progress', value: `${Math.round((stats.completedLessons / stats.totalLessons) * 100)}%`, icon: <TrendingUpIcon />, accent: '#9B2E54' },
+            { label: 'Games Played',   value: stats.studentGamesPlayed,              icon: <TrendingUpIcon />,        accent: '#C8456D' },
+            { label: 'Best WPM',       value: stats.studentWpm,                      icon: <BoltIcon />,              accent: '#FFC700' },
+            { label: 'Accuracy',       value: `${stats.studentAccuracy}%`,           icon: <CenterFocusStrongIcon />, accent: '#E78AAC' },
+            { label: 'Total Lessons',  value: stats.studentTotalLessons,             icon: <MenuBookIcon />,          accent: '#9B2E54' },
         ];
-    }, [userRole, stats.totalStudents, stats.totalTeachers, stats.totalLessons, stats.averageWPM, stats.accuracy, stats.completedLessons]);
+    }, [userRole, stats.totalStudents, stats.totalTeachers, stats.totalLessons, stats.averageWPM, stats.accuracy,
+        stats.studentGamesPlayed, stats.studentWpm, stats.studentAccuracy, stats.studentTotalLessons]);
 
     const quickActions = useMemo(() => {
         const base = [
@@ -163,6 +245,7 @@ const Dashboard = () => {
         const extras = {
             STUDENT: [
                 { label: 'Leaderboard', path: '/leaderboard', icon: <EmojiEventsIcon /> },
+                { label: 'My Stats & Badges', path: '/my-stats', icon: <TrendingUpIcon /> },
                 { label: 'My Profile', path: '/student-details-form', icon: <ManageAccountsIcon /> },
             ],
             TEACHER: [
@@ -183,7 +266,8 @@ const Dashboard = () => {
         return [...base, ...(extras[userRole] || [])];
     }, [userRole]);
 
-    const progressPct = Math.round((stats.completedLessons / stats.totalLessons) * 100);
+    // WPM progress toward the 100 WPM milestone shown on the student welcome card.
+    const progressPct = Math.min(100, stats.studentWpm);
 
     return (
         <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', position: 'relative', overflow: 'hidden' }}>
@@ -244,8 +328,8 @@ const Dashboard = () => {
                             {userRole === 'STUDENT' && (
                                 <Box sx={{ minWidth: { md: 240 } }}>
                                     <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
-                                        <Typography variant="overline" sx={{ color: 'primary.main', fontWeight: 700 }}>Course Progress</Typography>
-                                        <Typography variant="overline" sx={{ color: 'text.primary', fontWeight: 700 }}>{progressPct}%</Typography>
+                                        <Typography variant="overline" sx={{ color: 'primary.main', fontWeight: 700 }}>WPM Progress</Typography>
+                                        <Typography variant="overline" sx={{ color: 'text.primary', fontWeight: 700 }}>{stats.studentWpm} / 100</Typography>
                                     </Stack>
                                     <LinearProgress
                                         variant="determinate"
@@ -355,55 +439,47 @@ const Dashboard = () => {
                 {/* Recent Activities */}
                 <Card>
                     <CardContent sx={{ p: { xs: 3, md: 4 } }}>
-                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                            <Typography variant="h5" sx={{ color: 'text.primary' }}>
-                                Recent Activity
+                        <Typography variant="h5" sx={{ color: 'text.primary', mb: 2 }}>Recent Activity</Typography>
+                        {recentActivities.length === 0 ? (
+                            <Typography sx={{ color: 'text.secondary', py: 3, textAlign: 'center' }}>
+                                No activity yet — play a game mode to see your history here.
                             </Typography>
-                            <Chip
-                                icon={<EmojiEventsIcon sx={{ fontSize: 16 }} />}
-                                label={`${recentActivities.length} entries`}
-                                size="small"
-                                sx={{
-                                    bgcolor: 'rgba(255,199,0,0.15)',
-                                    color: 'warning.main',
-                                    fontWeight: 700,
-                                    border: '1.5px solid',
-                                    borderColor: 'warning.main',
-                                }}
-                            />
-                        </Stack>
-                        <Stack divider={<Divider sx={{ borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }} />}>
-                            {recentActivities.map((a) => {
-                                const meta = STATUS_META[a.status] || STATUS_META.pending;
-                                return (
-                                    <Stack
-                                        key={a.id}
-                                        direction="row"
-                                        justifyContent="space-between"
-                                        alignItems="center"
-                                        sx={{ py: 2 }}
-                                    >
-                                        <Box>
-                                            <Typography sx={{ color: 'text.primary', fontWeight: 700 }}>{a.title}</Typography>
-                                            <Typography variant="body2" sx={{ color: 'text.secondary' }}>{a.date}</Typography>
-                                        </Box>
-                                        <Chip
-                                            icon={React.cloneElement(meta.icon, { sx: { fontSize: 16, color: `${meta.color} !important` } })}
-                                            label={meta.label}
-                                            size="small"
-                                            sx={{
-                                                bgcolor: `${meta.color}22`,
-                                                color: meta.color,
-                                                fontWeight: 700,
-                                                border: '1.5px solid',
-                                                borderColor: meta.color,
-                                                '& .MuiChip-icon': { color: meta.color },
-                                            }}
-                                        />
-                                    </Stack>
-                                );
-                            })}
-                        </Stack>
+                        ) : (
+                            <Stack divider={<Divider sx={{ borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }} />}>
+                                {recentActivities.map((a) => {
+                                    const meta = STATUS_META[a.status] || STATUS_META.pending;
+                                    return (
+                                        <Stack
+                                            key={a.id}
+                                            direction="row"
+                                            justifyContent="space-between"
+                                            alignItems="center"
+                                            sx={{ py: 2 }}
+                                        >
+                                            <Box>
+                                                <Typography sx={{ color: 'text.primary', fontWeight: 700 }}>{a.title}</Typography>
+                                                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                                                    {a.date}{a.score != null ? ` · Score: ${a.score}` : ''}
+                                                </Typography>
+                                            </Box>
+                                            <Chip
+                                                icon={React.cloneElement(meta.icon, { sx: { fontSize: 16, color: `${meta.color} !important` } })}
+                                                label={meta.label}
+                                                size="small"
+                                                sx={{
+                                                    bgcolor: `${meta.color}22`,
+                                                    color: meta.color,
+                                                    fontWeight: 700,
+                                                    border: '1.5px solid',
+                                                    borderColor: meta.color,
+                                                    '& .MuiChip-icon': { color: meta.color },
+                                                }}
+                                            />
+                                        </Stack>
+                                    );
+                                })}
+                            </Stack>
+                        )}
                     </CardContent>
                 </Card>
             </Box>

@@ -6,6 +6,7 @@ import { lessons as quizLessons, quizTitle } from "./QuizData";
 import CodeWormBattle from "./CodeWormBattle";
 import { API_BASE } from "../../../shared/api/client";
 import { authFetch } from "../../../shared/api/authFetch";
+import { useScoreSubmission } from "../../../shared/hooks/useScoreSubmission";
 import "./SyntaxSaverLesson.css";
 
 // Convert a backend SyntaxSaverQuizDTO step into the legacy QuizData shape so the
@@ -61,6 +62,7 @@ function boot() {
 
 // ── MAIN ──────────────────────────────────────────────────────────────────────
 export default function SyntaxSaverLesson({ onBack }) {
+  const { submitScore } = useScoreSubmission();
   const [resetKey, setResetKey] = useState(0);
   const [step, setStep] = useState(0);
   const [score, setScore] = useState(0);
@@ -99,8 +101,14 @@ export default function SyntaxSaverLesson({ onBack }) {
   const handleNext = (points = 0) => {
     setScore(prev => prev + points);
     setFeedback("");
-    if (step < lessons.length - 1) setStep(prev => prev + 1);
-    else setFeedback("🎉 Lesson Complete!");
+    if (step < lessons.length - 1) {
+      setStep(prev => prev + 1);
+    } else {
+      setFeedback("🎉 Lesson Complete!");
+      // Submit to backend — awards XP, updates leaderboard, triggers badge evaluation.
+      const totalScore = score + points;
+      submitScore("SYNTAX_SAVER", { score: totalScore, accuracy: 100, wpm: 0 });
+    }
   };
 
   const handleBackStep = () => {

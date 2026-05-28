@@ -11,6 +11,7 @@ import ModePickerCard from "../../../shared/assessment/ModePickerCard";
 import {
     MODE, GAME, MODE_META, canStartMode, recordAttempt, getHighLow, getRemark,
 } from "../../../shared/assessment/modes";
+import { useScoreSubmission } from "../../../shared/hooks/useScoreSubmission";
 
 /**
  * Syntax Sniper — fill-in-the-blank speedrun.
@@ -60,6 +61,8 @@ function buildSegments(drill) {
 export default function SyntaxSniper() {
     const theme = useTheme();
     const isDark = theme.palette.mode === "dark";
+
+    const { submitScore } = useScoreSubmission();
 
     const [view, setView] = useState("mode"); // mode | playing | done
     const [mode, setMode] = useState(null);
@@ -220,6 +223,8 @@ export default function SyntaxSniper() {
                 hits,
             });
         }
+        // Submit to backend — awards XP, updates leaderboard, triggers badge evaluation.
+        submitScore("SYNTAX_SAVER", { score: totalScore, accuracy: percent, wpm: 0 });
         setView("done");
     };
 

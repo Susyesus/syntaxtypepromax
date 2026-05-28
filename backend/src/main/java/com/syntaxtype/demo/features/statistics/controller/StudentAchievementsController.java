@@ -32,8 +32,10 @@ public class StudentAchievementsController {
     }
 
     @PreAuthorize("hasAnyRole('ADMIN','TEACHER','STUDENT')")
-    @GetMapping("/student")
-    public ResponseEntity<List<StudentAchievementsDTO>> getByStudent(@RequestBody Student student) {
+    @GetMapping("/by-student")
+    public ResponseEntity<List<StudentAchievementsDTO>> getByStudentId(@RequestParam Long studentId) {
+        Student student = new Student();
+        student.setStudentId(studentId);
         return ResponseEntity.ok(studentAchievementsService.findByStudent(student));
     }
 

@@ -19,13 +19,13 @@ import java.util.Optional;
 public class AchievementsController {
     private final AchievementsService achievementsService;
 
-    @PreAuthorize("hasAnyRole('ADMIN','TEACHER')")
+    @PreAuthorize("hasAnyRole('ADMIN','TEACHER','STUDENT','USER')")
     @GetMapping
     public ResponseEntity<List<AchievementsDTO>> getAllAchievements() {
         return ResponseEntity.ok(achievementsService.findAll());
     }
 
-    @PreAuthorize("hasAnyRole('ADMIN','TEACHER')")
+    @PreAuthorize("hasAnyRole('ADMIN','TEACHER','STUDENT','USER')")
     @GetMapping("/{achievementId}")
     public ResponseEntity<Optional<AchievementsDTO>> getById(@PathVariable Long achievementId) {
         return ResponseEntity.ok(achievementsService.findByAchievementId(achievementId));
