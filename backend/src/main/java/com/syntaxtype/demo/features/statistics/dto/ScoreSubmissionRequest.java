@@ -32,4 +32,25 @@ public class ScoreSubmissionRequest {
      * Time spent in seconds (optional).
      */
     private Integer timeSpent;
+
+    /**
+     * Assessment mode: PRE_TEST, PRACTICE, or POST_TEST.
+     * Null for casual (non-assessment) plays. Required to compute
+     * pre-test → post-test improvement for the research objectives.
+     */
+    private String modeType;
+
+    /**
+     * Per-objective tallies (optional, default 0):
+     *   correctCount — items answered/cleared correctly this session
+     *     (Translation Terminal prompts correct, Syntax Sniper blanks filled,
+     *      Bug Smasher bugs fixed).
+     *   totalCount   — items attempted this session.
+     *   errorCount   — mistakes this session (misses / wrong fixes).
+     * These drive error-detection, syntax-recall, and punctuation-accuracy
+     * reporting independent of the raw game score.
+     */
+    private Integer correctCount;
+    private Integer totalCount;
+    private Integer errorCount;
 }

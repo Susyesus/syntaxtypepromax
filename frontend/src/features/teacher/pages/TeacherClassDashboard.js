@@ -62,9 +62,15 @@ const TeacherClassDashboard = () => {
     const [orderBy, setOrderBy] = useState('name');
     const [order, setOrder] = useState('asc');
     const [selected, setSelected] = useState(null);
+    const [progress, setProgress] = useState([]);
 
     const fetchRoster = async () => {
         setLoadState('loading');
+        // Pre/Post objective progress (best-effort; independent of roster load).
+        try {
+            const pr = await authFetch(`${API_BASE}/api/analytics/progress`);
+            if (pr.ok) setProgress(await pr.json());
+        } catch { /* leave progress empty */ }
         try {
             const res = await authFetch(`${API_BASE}/api/students`);
             if (!res.ok) throw new Error('students fetch failed');
@@ -112,21 +118,24 @@ const TeacherClassDashboard = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const exportCsv = async () => {
+    const downloadCsv = async (path, filename) => {
         try {
-            const res = await authFetch(`${API_BASE}/api/analytics/students.csv`);
+            const res = await authFetch(`${API_BASE}${path}`);
             if (!res.ok) { alert('Export failed. Make sure you are signed in as a teacher.'); return; }
             const blob = await res.blob();
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'students_analytics.csv';
+            a.download = filename;
             a.click();
             window.URL.revokeObjectURL(url);
         } catch {
             alert('Export failed.');
         }
     };
+
+    const exportCsv = () => downloadCsv('/api/analytics/students.csv', 'students_analytics.csv');
+    const exportProgressCsv = () => downloadCsv('/api/analytics/progress.csv', 'progress_pre_post.csv');
 
     const rows = useMemo(() => {
         const built = students.map((s) => {
@@ -301,6 +310,74 @@ const TeacherClassDashboard = () => {
                         </Card>
                     ))}
                 </Box>
+
+                {/* Pre-Test → Post-Test Progress (objective measurement) */}
+                <Card sx={{ mb: 4 }}>
+                    <CardContent sx={{ p: { xs: 2, md: 3 } }}>
+                        <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} spacing={1} sx={{ mb: 2 }}>
+                            <Box>
+                                <Typography variant="h5" sx={{ color: 'text.primary' }}>
+                                    Pre-Test → Post-Test Progress
+                                </Typography>
+                                <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+                                    Cohort improvement per game mode (students who completed both a pre-test and a post-test).
+                                </Typography>
+                            </Box>
+                            <Button
+                                variant="outlined"
+                                startIcon={<DownloadIcon />}
+                                onClick={exportProgressCsv}
+                                sx={{ borderColor: 'primary.main', color: 'primary.main', textTransform: 'none' }}
+                            >
+                                Export Progress CSV
+                            </Button>
+                        </Stack>
+
+                        {progress.every((g) => g.studentsAssessed === 0) ? (
+                            <Typography variant="body2" sx={{ color: 'text.secondary', fontStyle: 'italic', py: 2 }}>
+                                No pre/post results yet. Improvement appears once students complete a Pre-Test and a Post-Test in a game mode.
+                            </Typography>
+                        ) : (
+                            <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' } }}>
+                                {progress.map((g) => {
+                                    const imp = g.avgImprovementPercent;
+                                    const impColor = imp > 0 ? '#2D7A3A' : imp < 0 ? '#C8456D' : 'text.secondary';
+                                    return (
+                                        <Card key={g.game} variant="outlined">
+                                            <CardContent sx={{ p: 2.5 }}>
+                                                <Typography variant="overline" sx={{ color: 'primary.main', fontWeight: 700 }}>
+                                                    {g.label}
+                                                </Typography>
+                                                <Stack direction="row" alignItems="baseline" spacing={1} sx={{ mt: 1 }}>
+                                                    <Typography variant="h4" sx={{ color: impColor, fontFamily: 'Roboto, "Helvetica Neue", Arial, sans-serif', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+                                                        {imp > 0 ? '+' : ''}{imp}
+                                                    </Typography>
+                                                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>pp accuracy</Typography>
+                                                </Stack>
+                                                <Stack direction="row" justifyContent="space-between" sx={{ mt: 1.5 }}>
+                                                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>Pre → Post</Typography>
+                                                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                                                        {g.avgPrePercent}% → {g.avgPostPercent}%
+                                                    </Typography>
+                                                </Stack>
+                                                <Stack direction="row" justifyContent="space-between" sx={{ mt: 0.5 }}>
+                                                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>Avg score</Typography>
+                                                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                                                        {g.avgPreScore} → {g.avgPostScore}
+                                                    </Typography>
+                                                </Stack>
+                                                <Stack direction="row" justifyContent="space-between" sx={{ mt: 0.5 }}>
+                                                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>Students assessed</Typography>
+                                                    <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 600 }}>{g.studentsAssessed}</Typography>
+                                                </Stack>
+                                            </CardContent>
+                                        </Card>
+                                    );
+                                })}
+                            </Box>
+                        )}
+                    </CardContent>
+                </Card>
 
                 {/* Roster Card */}
                 <Card>

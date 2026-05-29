@@ -43,14 +43,19 @@ export const practiceBank = {
         '#include <stdio.h>',
     ],
     // Full-line bugs: display the buggy form, player must type the correct form.
+    // `category` tags the error type (OBJ1 — support >=4 categories):
+    //   missing-terminator | mismatched-delimiter | incorrect-keyword |
+    //   malformed-declaration | wrong-operator. (wrongWords above are all the
+    //   incorrect-keyword category.)
     buggyLines: [
-        { buggy: 'printf("Hello!\\n")',     correct: 'printf("Hello!\\n");' },
-        { buggy: 'int x = 0',              correct: 'int x = 0;' },
-        { buggy: 'if (x > 0) x++',         correct: 'if (x > 0) x++;' },
-        { buggy: 'return 0',               correct: 'return 0;' },
-        { buggy: 'int a[5]',               correct: 'int a[5];' },
-        { buggy: 'scanf("%d", n);',         correct: 'scanf("%d", &n);' },
-        { buggy: 'while (i < 10) i--',     correct: 'while (i < 10) i++;' },
+        { buggy: 'printf("Hello!\\n")',     correct: 'printf("Hello!\\n");',  category: 'missing-terminator' },
+        { buggy: 'int x = 0',              correct: 'int x = 0;',            category: 'missing-terminator' },
+        { buggy: 'if (x > 0) x++',         correct: 'if (x > 0) x++;',       category: 'missing-terminator' },
+        { buggy: 'return 0',               correct: 'return 0;',             category: 'missing-terminator' },
+        { buggy: 'int a[5]',               correct: 'int a[5];',             category: 'malformed-declaration' },
+        { buggy: 'scanf("%d", n);',         correct: 'scanf("%d", &n);',      category: 'malformed-declaration' },
+        { buggy: 'while (i < 10) i--',     correct: 'while (i < 10) i++;',   category: 'wrong-operator' },
+        { buggy: 'if (x > 0 { x++; }',     correct: 'if (x > 0) { x++; }',   category: 'mismatched-delimiter' },
     ],
     // Sequence blocks: 2–3 lines that must be typed in listed order.
     sequenceBlocks: [
@@ -98,12 +103,13 @@ export const testBank = {
         'int main(int argc, char **argv)',
     ],
     buggyLines: [
-        { buggy: 'int *arr = malloc(n * sizeof(int))',        correct: 'int *arr = malloc(n * sizeof(int));' },
-        { buggy: 'if (ptr = NULL) free(ptr);',               correct: 'if (ptr != NULL) free(ptr);' },
-        { buggy: 'return EXIT_FAILURE;',                     correct: 'return EXIT_SUCCESS;' },
-        { buggy: 'memset(buffer, 1, sizeof(buffer));',       correct: 'memset(buffer, 0, sizeof(buffer));' },
-        { buggy: 'struct Node *head = head;',                correct: 'struct Node *head = NULL;' },
-        { buggy: 'const char *name = syntaxtype;',           correct: 'const char *name = "syntaxtype";' },
+        { buggy: 'int *arr = malloc(n * sizeof(int))',        correct: 'int *arr = malloc(n * sizeof(int));', category: 'missing-terminator' },
+        { buggy: 'if (ptr = NULL) free(ptr);',               correct: 'if (ptr != NULL) free(ptr);',        category: 'wrong-operator' },
+        { buggy: 'return EXIT_FAILURE;',                     correct: 'return EXIT_SUCCESS;',                category: 'incorrect-keyword' },
+        { buggy: 'memset(buffer, 1, sizeof(buffer));',       correct: 'memset(buffer, 0, sizeof(buffer));',  category: 'wrong-operator' },
+        { buggy: 'struct Node *head = head;',                correct: 'struct Node *head = NULL;',           category: 'malformed-declaration' },
+        { buggy: 'const char *name = syntaxtype;',           correct: 'const char *name = "syntaxtype";',    category: 'malformed-declaration' },
+        { buggy: 'int main(int argc, char **argv {',         correct: 'int main(int argc, char **argv) {',   category: 'mismatched-delimiter' },
     ],
     sequenceBlocks: [
         ['int *arr = malloc(n * sizeof(int));', 'memset(arr, 0, n * sizeof(int));', 'free(arr);'],

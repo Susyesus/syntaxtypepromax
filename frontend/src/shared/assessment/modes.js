@@ -7,6 +7,9 @@
 // a `modeType` column (Category 2) the read/write helpers below get swapped
 // for an authFetch call without touching any consumer.
 
+import { getUserId } from "../auth/JwtUtils";
+import { getAuthToken } from "../auth/AuthUtils";
+
 export const MODE = {
     PRE_TEST: "PRE_TEST",
     PRACTICE: "PRACTICE",
@@ -52,8 +55,30 @@ export const MODE_META = {
     },
 };
 
-const ATTEMPTS_KEY = (game, mode) => `assess:attempts:${game}:${mode}`;
-const SCORES_KEY = (game, mode) => `assess:scores:${game}:${mode}`;
+// Scope every key by the logged-in user id so pre/post-test attempts and
+// scores never carry over between accounts sharing the same browser. Falls
+// back to "anon" when no one is logged in.
+const userScope = () => {
+    const id = getUserId(getAuthToken());
+    return id != null ? `u${id}` : "anon";
+};
+
+const ATTEMPTS_KEY = (game, mode) => `assess:${userScope()}:attempts:${game}:${mode}`;
+const SCORES_KEY = (game, mode) => `assess:${userScope()}:scores:${game}:${mode}`;
+
+// One-time cleanup of legacy un-scoped keys (`assess:attempts:…` /
+// `assess:scores:…`) left by the pre-user-scoping version. These were the
+// source of cross-account carry-over; new keys always have a user-scope
+// segment, so this pattern only matches the old format.
+(() => {
+    try {
+        const legacy = /^assess:(attempts|scores):/;
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+            const key = localStorage.key(i);
+            if (key && legacy.test(key)) localStorage.removeItem(key);
+        }
+    } catch {}
+})();
 
 const safeRead = (key, fallback) => {
     try {

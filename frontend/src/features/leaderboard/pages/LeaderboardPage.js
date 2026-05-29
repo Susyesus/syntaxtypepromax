@@ -30,6 +30,7 @@ import {
   AppBar,
   Toolbar,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 
 const GAME_OPTIONS = [
   { value: "", label: "All Games" },
@@ -200,7 +201,7 @@ const LeaderboardPage = () => {
   const isLoggedIn = !!getAuthToken();
 
   return (
-    <Box sx={{ minHeight: "100vh", bgcolor: "#f5f5f5", pt: 2 }}>
+    <Box sx={{ minHeight: "100vh", bgcolor: "background.default", pt: 2 }}>
       <Container maxWidth="lg">
         {/* Guest Banner */}
         {!isLoggedIn && (
@@ -241,14 +242,14 @@ const LeaderboardPage = () => {
         <Typography
           variant="h4"
           component="h1"
-          sx={{ mb: 3, fontWeight: "bold", color: "#333" }}
+          sx={{ mb: 3, fontWeight: "bold", color: "text.primary" }}
         >
           Leaderboard
         </Typography>
 
         {/* Metric Toggle Section */}
         <Box sx={{ mb: 3 }}>
-          <Typography variant="body2" sx={{ mb: 1, color: "#666" }}>
+          <Typography variant="body2" sx={{ mb: 1, color: "text.secondary" }}>
             Sort by: <strong>{selectedMetric.toUpperCase()}</strong>
           </Typography>
           <Tooltip
@@ -385,12 +386,21 @@ const LeaderboardPage = () => {
                   return (
                     <TableRow
                       key={`${entry.username}-${rank}`}
-                      sx={{
-                        backgroundColor: isCurrentUserRow ? "#e3f2fd" : "inherit",
-                        border: isCurrentUserRow ? "2px solid #1976d2" : "none",
-                        "&:hover": {
-                          backgroundColor: isCurrentUserRow ? "#bbdefb" : "#f5f5f5",
-                        },
+                      sx={(theme) => {
+                        const tint = theme.palette.mode === "dark" ? 0.28 : 0.12;
+                        return {
+                          backgroundColor: isCurrentUserRow
+                            ? alpha(theme.palette.primary.main, tint)
+                            : "inherit",
+                          border: isCurrentUserRow
+                            ? `2px solid ${theme.palette.primary.main}`
+                            : "none",
+                          "&:hover": {
+                            backgroundColor: isCurrentUserRow
+                              ? alpha(theme.palette.primary.main, tint + 0.1)
+                              : theme.palette.action.hover,
+                          },
+                        };
                       }}
                     >
                       <TableCell sx={{ fontWeight: "bold" }}>
@@ -404,7 +414,7 @@ const LeaderboardPage = () => {
                             sx={{
                               ml: 1,
                               fontSize: "0.75rem",
-                              color: "#1976d2",
+                              color: "primary.main",
                               fontWeight: "bold",
                             }}
                           >

@@ -112,10 +112,10 @@ const TeacherDetailsForm = () => {
 
     if (userRole === null) { // Still determining user role
         return (
-            <div style={{ backgroundColor: '#f3f4f6', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <CircularProgress />
-                <Typography sx={{ ml: 2 }}>Loading...</Typography>
-            </div>
+                <Typography sx={{ ml: 2, color: 'text.primary' }}>Loading...</Typography>
+            </Box>
         );
     }
 
@@ -129,16 +129,16 @@ const TeacherDetailsForm = () => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 minHeight: '100vh',
-                backgroundColor: '#f3f4f6',
+                bgcolor: 'background.default',
                 padding: '1rem',
             }}
         >
             <Box
                 sx={{
-                    backgroundColor: '#ffffff',
+                    bgcolor: 'background.paper',
                     padding: '2rem',
                     borderRadius: '0.5rem',
-                    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+                    boxShadow: 3,
                     width: '100%',
                     display: 'flex',
                     flexDirection: 'column',
@@ -152,7 +152,7 @@ const TeacherDetailsForm = () => {
                         fontWeight: 'bold',
                         textAlign: 'center',
                         marginBottom: '1.5rem',
-                        color: '#1f2937',
+                        color: 'text.primary',
                     }}
                 >
                     Complete Your Teacher Profile
@@ -173,7 +173,7 @@ const TeacherDetailsForm = () => {
                     <TextField margin="normal" required fullWidth id="institution" label="Institution/School" name="institution" value={institution} onChange={(e) => setInstitution(e.target.value)} variant="outlined" size="small" error={!!errors.institution} helperText={errors.institution} />
                     <TextField margin="normal" required fullWidth id="subject" label="Subject Taught" name="subject" value={subject} onChange={(e) => setSubject(e.target.value)} variant="outlined" size="small" error={!!errors.subject} helperText={errors.subject} />
 
-                    <Button type="submit" fullWidth variant="contained" sx={{ mt: 3, mb: 2, backgroundColor: '#2563eb', '&:hover': { backgroundColor: '#1d4ed8' }, borderRadius: '0.375rem', textTransform: 'none', padding: '0.5rem 1rem' }} disabled={loading}>
+                    <Button type="submit" fullWidth variant="contained" color="primary" sx={{ mt: 3, mb: 2, borderRadius: '0.375rem', textTransform: 'none', padding: '0.5rem 1rem' }} disabled={loading}>
                         {loading ? <CircularProgress size={24} color="inherit" /> : 'Save Details'}
                     </Button>
                 </Box>

@@ -10,10 +10,13 @@ import com.syntaxtype.demo.features.lesson.service.ScoreService;
 import com.syntaxtype.demo.features.statistics.service.AchievementEvaluatorService;
 import com.syntaxtype.demo.features.statistics.service.LeaderboardService;
 import com.syntaxtype.demo.features.statistics.service.UserStatisticsService;
+import com.syntaxtype.demo.features.user.entity.User;
+import com.syntaxtype.demo.features.user.repository.UserRepository;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import com.syntaxtype.demo.features.lesson.entity.Score;
 
@@ -30,17 +33,20 @@ public class ScoreController {
     private final LeaderboardService leaderboardService;
     private final UserStatisticsService userStatisticsService;
     private final AchievementEvaluatorService achievementEvaluatorService;
+    private final UserRepository userRepository;
 
     public ScoreController(ScoreService scoreService,
                            ScoreRepository scoreRepository,
                            LeaderboardService leaderboardService,
                            UserStatisticsService userStatisticsService,
-                           AchievementEvaluatorService achievementEvaluatorService) {
+                           AchievementEvaluatorService achievementEvaluatorService,
+                           UserRepository userRepository) {
         this.scoreService = scoreService;
         this.scoreRepository = scoreRepository;
         this.leaderboardService = leaderboardService;
         this.userStatisticsService = userStatisticsService;
         this.achievementEvaluatorService = achievementEvaluatorService;
+        this.userRepository = userRepository;
     }
     @PostMapping
     public ResponseEntity<Score> submitScore(@RequestBody ScoreDTO scoreDTO) {
@@ -96,6 +102,7 @@ public class ScoreController {
     @PostMapping("/{category}")
     @PreAuthorize("hasAnyRole('ADMIN','TEACHER','STUDENT','USER')")
     @CacheEvict(value = "leaderboard", allEntries = true)
+    @Transactional
     public ResponseEntity<LeaderboardUpdateResult> submitScore(
             @PathVariable String category,
             @RequestBody ScoreSubmissionRequest request,
@@ -109,35 +116,48 @@ public class ScoreController {
             return ResponseEntity.badRequest().build();
         }
 
-        // Get username from JWT
-        String username = userDetails.getUser().getUsername();
+        // The principal's User comes from the JWT filter's (closed) persistence
+        // context, so it's detached. Re-load a managed instance inside this
+        // request's transaction; UserStatistics uses @MapsId and would otherwise
+        // throw "detached entity passed to persist" on a user's first session.
+        User user = userRepository.findById(userDetails.getUser().getUserId())
+                .orElse(userDetails.getUser());
+        String username = user.getUsername();
+
+        int wpm        = Optional.ofNullable(request.getWpm()).orElse(0);
+        int accuracy   = Optional.ofNullable(request.getAccuracy()).orElse(100);
+        int rawScore   = Optional.ofNullable(request.getScore()).orElse(0);
+        int correct    = Optional.ofNullable(request.getCorrectCount()).orElse(0);
+        int total      = Optional.ofNullable(request.getTotalCount()).orElse(0);
+        int errors     = Optional.ofNullable(request.getErrorCount()).orElse(0);
 
         // Save to Score table (always)
         Score score = new Score();
-        score.setScore(Optional.ofNullable(request.getScore()).orElse(0));
+        score.setScore(rawScore);
         score.setTimeInSeconds(Optional.ofNullable(request.getTimeSpent()).orElse(0));
         score.setChallengeType(categoryEnum.name());
-        score.setWpm(Optional.ofNullable(request.getWpm()).orElse(0));
+        score.setWpm(wpm);
+        score.setAccuracy(accuracy);
+        score.setModeType(request.getModeType()); // PRE_TEST / PRACTICE / POST_TEST / null
+        score.setCorrectCount(correct);
+        score.setTotalCount(total);
+        score.setErrorCount(errors);
         score.setSubmittedAt(LocalDateTime.now());
-        score.setUser(userDetails.getUser());
+        score.setUser(user);
         scoreService.saveScore(score);
-
-        int wpm      = Optional.ofNullable(request.getWpm()).orElse(0);
-        int accuracy = Optional.ofNullable(request.getAccuracy()).orElse(100);
-        int rawScore = Optional.ofNullable(request.getScore()).orElse(0);
 
         // Update leaderboard if better
         LeaderboardUpdateResult result = leaderboardService.updateLeaderboardIfBetter(
                 username, categoryEnum, wpm, accuracy, rawScore);
 
-        // Update all cumulative stats (WPM, accuracy, tests taken, time, XP) in one write
+        // Update all cumulative stats (WPM, accuracy, tests taken, time, XP, errors) in one write
         userStatisticsService.recordSession(
-                userDetails.getUser(), wpm, accuracy,
-                Optional.ofNullable(request.getTimeSpent()).orElse(0), rawScore);
+                user, wpm, accuracy,
+                Optional.ofNullable(request.getTimeSpent()).orElse(0), rawScore, errors);
 
         // Auto-award any newly triggered achievement badges
         List<String> badges = achievementEvaluatorService.evaluateAndAward(
-                userDetails.getUser(), wpm, accuracy, rawScore);
+                user, wpm, accuracy, rawScore);
         result.setAwardedBadges(badges);
 
         return ResponseEntity.ok(result);

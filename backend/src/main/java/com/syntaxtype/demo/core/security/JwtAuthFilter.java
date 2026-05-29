@@ -49,11 +49,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
             if (jwtUtil.validateToken(jwt)) {
-                // 🟡 Extract the role from the token
-                String role = jwtUtil.extractRole(jwt); // e.g., "ROLE_ADMIN"
+                // 🟡 Extract the role from the token. Tokens store the bare enum
+                // name (e.g. "STUDENT"), but Spring's hasRole/hasAnyRole checks
+                // expect the "ROLE_" prefix. Normalize so @PreAuthorize matches.
+                String role = jwtUtil.extractRole(jwt); // e.g., "STUDENT"
+                String authority = (role != null && role.startsWith("ROLE_")) ? role : "ROLE_" + role;
 
                 // 🟢 Set the authority explicitly from token
-                List<GrantedAuthority> authorities = List.of(new SimpleGrantedAuthority(role));
+                List<GrantedAuthority> authorities = List.of(new SimpleGrantedAuthority(authority));
 
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                         userDetails, null, authorities

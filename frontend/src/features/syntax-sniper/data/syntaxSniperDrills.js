@@ -187,6 +187,157 @@ int main()
 }`,
         answers: [";", ";", ",", ";", ";"],
     },
+    {
+        id: "P-13",
+        title: "Triple print",
+        difficulty: "easy",
+        code: `int main()
+{
+    printf("A")_
+    printf("B")_
+    printf("C")_
+    return 0_
+}`,
+        answers: [";", ";", ";", ";"],
+    },
+    {
+        id: "P-14",
+        title: "Add three",
+        difficulty: "easy",
+        code: `int main()
+{
+    int a = 1_ b = 2_ c = 3_
+    printf("%d"_ a + b + c)_
+    return 0_
+}`,
+        answers: [",", ",", ";", ",", ";", ";"],
+    },
+    {
+        id: "P-15",
+        title: "While sum",
+        difficulty: "medium",
+        code: `int main()
+{
+    int i = 1_ sum = 0_
+    while (i <= 4)
+    {
+        sum += i_
+        i++_
+    }
+    printf("%d"_ sum)_
+    return 0_
+}`,
+        answers: [",", ";", ";", ";", ",", ";", ";"],
+    },
+    {
+        id: "P-16",
+        title: "Nested loop",
+        difficulty: "medium",
+        code: `int main()
+{
+    for (int i = 0_ i < 2_ i++)
+    {
+        for (int j = 0_ j < 2_ j++)
+        {
+            printf("%d%d "_ i_ j)_
+        }
+    }
+    return 0_
+}`,
+        answers: [";", ";", ";", ";", ",", ",", ";", ";"],
+    },
+    {
+        id: "P-17",
+        title: "Void function",
+        difficulty: "medium",
+        code: `void greet()
+{
+    printf("hi")_
+}
+
+int main()
+{
+    greet()_
+    return 0_
+}`,
+        answers: [";", ";", ";"],
+    },
+    {
+        id: "P-18",
+        title: "Ternary sign",
+        difficulty: "medium",
+        code: `int main()
+{
+    int x = 5_
+    int s = (x > 0) ? 1 : -1_
+    printf("%d"_ s)_
+    return 0_
+}`,
+        answers: [";", ";", ",", ";", ";"],
+    },
+    {
+        id: "P-19",
+        title: "Array average",
+        difficulty: "hard",
+        code: `int main()
+{
+    int a[4] = {2_ 4_ 6_ 8}_
+    int sum = 0_
+    for (int i = 0_ i < 4_ i++)
+    {
+        sum += a[i]_
+    }
+    printf("%d"_ sum / 4)_
+    return 0_
+}`,
+        answers: [",", ",", ",", ";", ";", ";", ";", ";", ",", ";", ";"],
+    },
+    {
+        id: "P-20",
+        title: "Swap via pointers",
+        difficulty: "hard",
+        code: `void swap(int *a_ int *b)
+{
+    int t = *a_
+    *a = *b_
+    *b = t_
+}
+
+int main()
+{
+    int x = 1_ y = 2_
+    swap(&x_ &y)_
+    return 0_
+}`,
+        answers: [",", ";", ";", ";", ",", ";", ",", ";", ";"],
+    },
+    {
+        id: "P-21",
+        title: "Macro constant",
+        difficulty: "hard",
+        code: `#define MAX 100
+int main()
+{
+    int n = MAX_
+    printf("%d"_ n)_
+    return 0_
+}`,
+        answers: [";", ",", ";", ";"],
+    },
+    {
+        id: "P-22",
+        title: "Struct declare",
+        difficulty: "hard",
+        code: `struct Box { int w_ int h_ }_
+
+int main()
+{
+    struct Box b = {3_ 5}_
+    printf("%d"_ b.w * b.h)_
+    return 0_
+}`,
+        answers: [";", ";", ";", ",", ";", ",", ";", ";"],
+    },
 ];
 
 export const testBank = [
@@ -383,6 +534,176 @@ int main()
     return 0_
 }`,
         answers: [";", ";", ";", ",", ";", ",", ",", ";", ";"],
+    },
+    {
+        id: "T-13",
+        title: "Sum of evens",
+        difficulty: "medium",
+        code: `int main()
+{
+    int sum = 0_
+    for (int i = 2_ i <= 10_ i += 2)
+    {
+        sum += i_
+    }
+    printf("%d"_ sum)_
+    return 0_
+}`,
+        answers: [";", ";", ";", ";", ",", ";", ";"],
+    },
+    {
+        id: "T-14",
+        title: "Reverse print",
+        difficulty: "medium",
+        code: `int main()
+{
+    for (int i = 5_ i > 0_ i--)
+    {
+        printf("%d "_ i)_
+    }
+    return 0_
+}`,
+        answers: [";", ";", ",", ";", ";"],
+    },
+    {
+        id: "T-15",
+        title: "Switch on grade",
+        difficulty: "medium",
+        code: `int main()
+{
+    char g = 'B'_
+    switch (g)
+    {
+        case 'A': printf("90+")_ break_
+        case 'B': printf("80+")_ break_
+        default: printf("<80")_
+    }
+    return 0_
+}`,
+        answers: [";", ";", ";", ";", ";", ";", ";"],
+    },
+    {
+        id: "T-16",
+        title: "Cube function",
+        difficulty: "medium",
+        code: `int cube(int n)
+{
+    return n * n * n_
+}
+
+int main()
+{
+    printf("%d"_ cube(3))_
+    return 0_
+}`,
+        answers: [";", ",", ";", ";"],
+    },
+    {
+        id: "T-17",
+        title: "Count matches",
+        difficulty: "hard",
+        code: `#include <string.h>
+int main()
+{
+    char s[] = "code"_
+    int c = 0_
+    for (int i = 0_ i < strlen(s)_ i++)
+    {
+        if (s[i] == 'o')
+        {
+            c++_
+        }
+    }
+    printf("%d"_ c)_
+    return 0_
+}`,
+        answers: [";", ";", ";", ";", ";", ",", ";", ";"],
+    },
+    {
+        id: "T-18",
+        title: "2D matrix sum",
+        difficulty: "hard",
+        code: `int main()
+{
+    int m[2][2] = { {1_ 2}_ {3_ 4} }_
+    int sum = 0_
+    for (int i = 0_ i < 2_ i++)
+    {
+        for (int j = 0_ j < 2_ j++)
+        {
+            sum += m[i][j]_
+        }
+    }
+    printf("%d"_ sum)_
+    return 0_
+}`,
+        answers: [",", ",", ",", ";", ";", ";", ";", ";", ";", ";", ",", ";", ";"],
+    },
+    {
+        id: "T-19",
+        title: "Function pointer",
+        difficulty: "hard",
+        code: `int add(int a_ int b)
+{
+    return a + b_
+}
+
+int main()
+{
+    int (*op)(int_ int) = add_
+    printf("%d"_ op(2_ 3))_
+    return 0_
+}`,
+        answers: [",", ";", ",", ";", ",", ",", ";", ";"],
+    },
+    {
+        id: "T-20",
+        title: "Array of structs",
+        difficulty: "hard",
+        code: `struct P { int x_ int y_ }_
+
+int main()
+{
+    struct P pts[2] = { {1_ 2}_ {3_ 4} }_
+    printf("%d"_ pts[1].y)_
+    return 0_
+}`,
+        answers: [";", ";", ";", ",", ",", ",", ";", ",", ";", ";"],
+    },
+    {
+        id: "T-21",
+        title: "Preprocessor guard",
+        difficulty: "hard",
+        code: `#define DEBUG 1
+int main()
+{
+    int x = 10_
+#if DEBUG
+    printf("x=%d"_ x)_
+#endif
+    return 0_
+}`,
+        answers: [";", ",", ";", ";"],
+    },
+    {
+        id: "T-22",
+        title: "Recursive factorial",
+        difficulty: "hard",
+        code: `int fact(int n)
+{
+    if (n <= 1)
+    {
+        return 1_
+    }
+    return n * fact(n - 1)_
+}
+
+int main()
+{
+    printf("%d"_ fact(4))_
+    return 0_
+}`,
+        answers: [";", ";", ",", ";", ";"],
     },
 ];
 
