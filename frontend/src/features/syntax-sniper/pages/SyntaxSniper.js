@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import {
     Box, Card, CardContent, Stack, Typography, Button, Chip, LinearProgress,
-    Alert, useTheme,
+    Alert, useTheme, Snackbar,
 } from "@mui/material";
 import GpsFixedIcon from "@mui/icons-material/GpsFixed";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
+import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import { practiceBank, testBank } from "../data/syntaxSniperDrills";
 import ModePickerCard from "../../../shared/assessment/ModePickerCard";
 import {
@@ -61,8 +63,9 @@ function buildSegments(drill) {
 export default function SyntaxSniper() {
     const theme = useTheme();
     const isDark = theme.palette.mode === "dark";
+    const navigate = useNavigate();
 
-    const { submitScore } = useScoreSubmission();
+    const { submitScore, submitSuccess, submitMessage, snackbarOpen, setSnackbarOpen } = useScoreSubmission();
 
     const [view, setView] = useState("mode"); // mode | playing | done
     const [mode, setMode] = useState(null);
@@ -91,6 +94,18 @@ export default function SyntaxSniper() {
     useEffect(() => { drillIdxRef.current = drillIdx; }, [drillIdx]);
     useEffect(() => { sessionRef.current = session; }, [session]);
     useEffect(() => { timeLeftRef.current = timeLeft; }, [timeLeft]);
+
+    // These four are read inside finalise which is captured in a stale closure
+    // (keyboard handler has [] deps). Without refs, finalise always sees the
+    // initial values: mode=null (skips recordAttempt), score=0, etc.
+    const modeRef = useRef(mode);
+    const scoreRef = useRef(score);
+    const completedDrillsRef = useRef(completedDrills);
+    const missesRef = useRef(misses);
+    useEffect(() => { modeRef.current = mode; }, [mode]);
+    useEffect(() => { scoreRef.current = score; }, [score]);
+    useEffect(() => { completedDrillsRef.current = completedDrills; }, [completedDrills]);
+    useEffect(() => { missesRef.current = misses; }, [misses]);
 
     const onPickMode = (m) => {
         if (!canStartMode(GAME.SNIPER, m)) return;
@@ -204,27 +219,36 @@ export default function SyntaxSniper() {
     // Compute final score with any pending advance bonus that React hasn't
     // committed yet, then persist + transition to results.
     const finalise = (pendingBonus = 0) => {
-        const totalScore = score + pendingBonus;
+        // Use refs so this works correctly even when called from a stale closure
+        // (the keyboard handler captures advanceDrill/finalise at initial render).
+        const totalScore = scoreRef.current + pendingBonus;
+        const drillsCleared = completedDrillsRef.current + (pendingBonus > 0 ? 1 : 0);
         const totalBlanks = sessionRef.current.reduce((sum, d) => sum + d.answers.length, 0);
-        const hits = Math.round(totalScore - (completedDrills * 50)) / 10; // approximate; not critical
-        // Cleaner accuracy: completed-drills / total-drills as a percent for remarks.
+        const hits = Math.round(totalScore - (drillsCleared * 50)) / 10;
         const percent = sessionRef.current.length === 0
             ? 0
-            : Math.round(((completedDrills + (pendingBonus > 0 ? 1 : 0)) / sessionRef.current.length) * 100);
+            : Math.round((drillsCleared / sessionRef.current.length) * 100);
 
-        if (mode) {
-            recordAttempt(GAME.SNIPER, mode, {
+        if (modeRef.current) {
+            recordAttempt(GAME.SNIPER, modeRef.current, {
                 score: totalScore,
                 percent,
-                misses,
-                drillsCleared: completedDrills + (pendingBonus > 0 ? 1 : 0),
+                misses: missesRef.current,
+                drillsCleared,
                 totalDrills: sessionRef.current.length,
                 totalBlanks,
                 hits,
             });
         }
-        // Submit to backend — awards XP, updates leaderboard, triggers badge evaluation.
-        submitScore("SYNTAX_SAVER", { score: totalScore, accuracy: percent, wpm: 0 });
+        submitScore("SYNTAX_SAVER", {
+            score: totalScore,
+            accuracy: percent,
+            wpm: 0,
+            modeType: modeRef.current,        // PRE_TEST / PRACTICE / POST_TEST
+            correctCount: drillsCleared,       // drills cleared correctly
+            totalCount: sessionRef.current.length, // drills presented
+            errorCount: missesRef.current,     // wrong keystrokes
+        });
         setView("done");
     };
 
@@ -239,6 +263,7 @@ export default function SyntaxSniper() {
     const remark = getRemark(remarkPercent);
 
     return (
+        <>
         <Box
             sx={{
                 minHeight: "100vh", bgcolor: "background.default", py: 4, px: { xs: 2, md: 4 },
@@ -413,7 +438,7 @@ export default function SyntaxSniper() {
                                 </Stack>
                             )}
 
-                            <Stack direction="row" spacing={2} justifyContent="center">
+                            <Stack direction="row" spacing={2} justifyContent="center" sx={{ flexWrap: "wrap" }}>
                                 <Button
                                     startIcon={<RestartAltIcon />}
                                     variant="contained"
@@ -426,6 +451,14 @@ export default function SyntaxSniper() {
                                 <Button variant="outlined" onClick={backToModePicker}>
                                     Back to mode picker
                                 </Button>
+                                <Button
+                                    startIcon={<TrendingUpIcon />}
+                                    variant="outlined"
+                                    color="success"
+                                    onClick={() => navigate("/my-stats")}
+                                >
+                                    View My Stats
+                                </Button>
                             </Stack>
                             {mode !== MODE.PRACTICE && !canStartMode(GAME.SNIPER, mode) && (
                                 <Typography variant="caption" sx={{ mt: 2, display: "block", color: "text.secondary" }}>
@@ -437,6 +470,18 @@ export default function SyntaxSniper() {
                 )}
             </Box>
         </Box>
+
+        <Snackbar
+            open={snackbarOpen}
+            autoHideDuration={5000}
+            onClose={() => setSnackbarOpen(false)}
+            anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+        >
+            <Alert onClose={() => setSnackbarOpen(false)} severity={submitSuccess ? "success" : "error"} sx={{ width: "100%" }}>
+                {submitMessage}
+            </Alert>
+        </Snackbar>
+        </>
     );
 }
 

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import {
     Box, Card, CardContent, Stack, Typography, Button, Chip, LinearProgress,
-    Alert, useTheme, IconButton, Tooltip,
+    Alert, useTheme, IconButton, Tooltip, Snackbar,
 } from "@mui/material";
 import TerminalIcon from "@mui/icons-material/Terminal";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
@@ -10,6 +11,7 @@ import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import { practiceBank, testBank, enemies } from "../data/translationPrompts";
 import { tokensEqual } from "../../../shared/utils/codeCompare";
 import ModePickerCard from "../../../shared/assessment/ModePickerCard";
@@ -63,7 +65,8 @@ export default function TranslationTerminal() {
     const [promptsCorrect, setPromptsCorrect] = useState(0);
     const [recorded, setRecorded] = useState(false);
 
-    const { submitScore } = useScoreSubmission();
+    const navigate = useNavigate();
+    const { submitScore, submitSuccess, submitMessage, snackbarOpen, setSnackbarOpen } = useScoreSubmission();
 
     const inputRef = useRef(null);
     const viewRef = useRef(view);
@@ -209,7 +212,13 @@ export default function TranslationTerminal() {
                 enemy: enemy?.name, promptsAnswered, promptsCorrect,
                 hpRemaining: playerHp,
             });
-            submitScore("GALAXY", { score, accuracy: percent, wpm: 0 });
+            submitScore("CODE_CHALLENGES", {
+                score, accuracy: percent, wpm: 0,
+                modeType: mode,                              // PRE_TEST / PRACTICE / POST_TEST
+                correctCount: promptsCorrect,                // C code recalled correctly
+                totalCount: promptsAnswered,                 // prompts attempted
+                errorCount: promptsAnswered - promptsCorrect, // recall misses
+            });
             setRecorded(true);
         }
     }, [view, mode, playerHp, promptsAnswered, promptsCorrect, enemy]);
@@ -430,6 +439,7 @@ export default function TranslationTerminal() {
     const remark = getRemark(accuracyPct);
 
     return (
+        <>
         <Box
             sx={{
                 minHeight: "100vh", bgcolor: "background.default", py: 4, px: { xs: 2, md: 4 },
@@ -667,7 +677,7 @@ export default function TranslationTerminal() {
                                 </Stack>
                             )}
 
-                            <Stack direction="row" spacing={2} justifyContent="center">
+                            <Stack direction="row" spacing={2} justifyContent="center" sx={{ flexWrap: "wrap" }}>
                                 <Button
                                     startIcon={<RestartAltIcon />}
                                     variant="outlined"
@@ -687,6 +697,14 @@ export default function TranslationTerminal() {
                                     </Button>
                                 )}
                                 <Button onClick={backToModePicker}>Back to mode picker</Button>
+                                <Button
+                                    startIcon={<TrendingUpIcon />}
+                                    variant="outlined"
+                                    color="success"
+                                    onClick={() => navigate("/my-stats")}
+                                >
+                                    View My Stats
+                                </Button>
                             </Stack>
                             {mode !== MODE.PRACTICE && !canStartMode(GAME.TRANSLATION, mode) && (
                                 <Typography variant="caption" sx={{ mt: 2, display: "block", color: "text.secondary" }}>
@@ -698,5 +716,17 @@ export default function TranslationTerminal() {
                 )}
             </Box>
         </Box>
+
+        <Snackbar
+            open={snackbarOpen}
+            autoHideDuration={5000}
+            onClose={() => setSnackbarOpen(false)}
+            anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+        >
+            <Alert onClose={() => setSnackbarOpen(false)} severity={submitSuccess ? "success" : "error"} sx={{ width: "100%" }}>
+                {submitMessage}
+            </Alert>
+        </Snackbar>
+        </>
     );
 }

@@ -120,12 +120,12 @@ const TeacherSetupAccountPage = () => {
     };
 
     return (
-        <Container component="main" maxWidth="xs" sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: '#f3f4f6', padding: '1rem' }}>
-            <Box sx={{ backgroundColor: '#ffffff', padding: '2rem', borderRadius: '0.5rem', boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <Typography component="h1" variant="h5" sx={{ fontWeight: 'bold', textAlign: 'center', marginBottom: '1.5rem', color: '#1f2937' }}>
+        <Container component="main" maxWidth="xs" sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', bgcolor: 'background.default', padding: '1rem' }}>
+            <Box sx={{ bgcolor: 'background.paper', padding: '2rem', borderRadius: '0.5rem', boxShadow: 3, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <Typography component="h1" variant="h5" sx={{ fontWeight: 'bold', textAlign: 'center', marginBottom: '1.5rem', color: 'text.primary' }}>
                     Setup Your Teacher Account
                 </Typography>
-                <Typography variant="body2" sx={{ textAlign: 'center', marginBottom: '1.5rem', color: '#4b5563' }}>
+                <Typography variant="body2" sx={{ textAlign: 'center', marginBottom: '1.5rem', color: 'text.secondary' }}>
                     Please set your new username and password.
                 </Typography>
 
@@ -140,7 +140,7 @@ const TeacherSetupAccountPage = () => {
                     <TextField margin="normal" required fullWidth name="newPassword" label="New Password" type="password" id="newPassword" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} variant="outlined" size="small" error={!!errors.newPassword} helperText={errors.newPassword} />
                     <TextField margin="normal" required fullWidth name="confirmPassword" label="Confirm New Password" type="password" id="confirmPassword" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} variant="outlined" size="small" error={!!errors.confirmPassword} helperText={errors.confirmPassword} />
 
-                    <Button type="submit" fullWidth variant="contained" sx={{ mt: 3, mb: 2, backgroundColor: '#2563eb', '&:hover': { backgroundColor: '#1d4ed8' }, borderRadius: '0.375rem', textTransform: 'none', padding: '0.5rem 1rem' }} disabled={loading}>
+                    <Button type="submit" fullWidth variant="contained" color="primary" sx={{ mt: 3, mb: 2, borderRadius: '0.375rem', textTransform: 'none', padding: '0.5rem 1rem' }} disabled={loading}>
                         {loading ? <CircularProgress size={24} color="inherit" /> : 'Save and Continue'}
                     </Button>
                 </Box>

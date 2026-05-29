@@ -207,6 +207,10 @@ public class UserStatisticsService {
      * Creates the UserStatistics row if it does not exist yet.
      */
     public void recordSession(User user, int wpm, int accuracy, int timeSpentSeconds, int rawScore) {
+        recordSession(user, wpm, accuracy, timeSpentSeconds, rawScore, 0);
+    }
+
+    public void recordSession(User user, int wpm, int accuracy, int timeSpentSeconds, int rawScore, int errorCount) {
         if (user == null) return;
         Optional<UserStatistics> statsOpt = userStatisticsRepository.findByUser(user);
         UserStatistics stats;
@@ -239,6 +243,11 @@ public class UserStatisticsService {
 
         // Session count
         stats.setTotalTestsTaken(newTests);
+
+        // Cumulative error count (previously never updated — used by OBJ1
+        // error-frequency reporting and the faculty CSV "Total Errors" column).
+        int prevErrors = stats.getTotalErrors() != null ? stats.getTotalErrors() : 0;
+        stats.setTotalErrors(prevErrors + Math.max(0, errorCount));
 
         // Lifetime XP
         long prevXp = stats.getLifetimeXp() != null ? stats.getLifetimeXp() : 0L;

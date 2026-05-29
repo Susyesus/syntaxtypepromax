@@ -21,6 +21,7 @@ import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import ManageAccountsIcon from '@mui/icons-material/ManageAccounts';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
+import StarIcon from '@mui/icons-material/Star';
 import BoltIcon from '@mui/icons-material/Bolt';
 import CenterFocusStrongIcon from '@mui/icons-material/CenterFocusStrong';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
@@ -28,7 +29,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import PendingIcon from '@mui/icons-material/Pending';
 import { getAuthToken } from '../../../shared/auth/AuthUtils';
-import { getUserRole, getUserId } from '../../../shared/auth/JwtUtils';
+import { getUserRole, getUserId, getUsername } from '../../../shared/auth/JwtUtils';
 import { authFetch } from '../../../shared/api/authFetch';
 import { API_BASE } from '../../../shared/api/client';
 
@@ -36,11 +37,12 @@ const CHALLENGE_LABELS = {
     FALLING_WORDS: 'Falling Code',
     TYPING_TESTS: 'Typing Test',
     GALAXY: 'Galaxy Challenge',
-    SYNTAX_SAVER: 'Syntax Saver',
+    SYNTAX_SAVER: 'Syntax Sniper',
     GRID: 'Grid Game',
     BOOKWORM: 'Bookworm',
-    CODE_CHALLENGES: 'Code Challenge',
+    CODE_CHALLENGES: 'Translation Terminal',
     TRANSLATION_TERMINAL: 'Translation Terminal',
+    CHALLENGES: 'Challenge',
     normal: 'Typing Test',
     falling: 'Falling Code',
 };
@@ -75,7 +77,15 @@ const Dashboard = () => {
         }
     }, [token]);
 
-    const userName = localStorage.getItem('userName') || 'Player';
+    // Prefer a stored display name, else the username from the JWT (sub claim),
+    // so the greeting shows the real user instead of a hardcoded "Player".
+    const userName = useMemo(() => {
+        try {
+            return localStorage.getItem('userName') || (token && getUsername(token)) || 'Player';
+        } catch {
+            return 'Player';
+        }
+    }, [token]);
 
     const [classStats, setClassStats] = useState(null);
     const [studentStats, setStudentStats] = useState(null);   // { wpm, accuracy, totalTestsTaken, totalLessons }
@@ -171,6 +181,7 @@ const Dashboard = () => {
                         accuracy:        stat?.accuracy        ?? 0,
                         totalTestsTaken: stat?.totalTestsTaken ?? 0,
                         totalLessons:    lessonCount,
+                        lifetimeXp:      stat?.lifetimeXp      ?? 0,
                     });
 
                     // Recent activity: last 3 score entries, newest first
@@ -206,6 +217,7 @@ const Dashboard = () => {
         studentAccuracy:      studentStats?.accuracy        ?? 0,
         studentGamesPlayed:   studentStats?.totalTestsTaken ?? 0,
         studentTotalLessons:  studentStats?.totalLessons    ?? 0,
+        studentXp:            studentStats?.lifetimeXp      ?? 0,
     };
 
     const statCards = useMemo(() => {
@@ -230,10 +242,10 @@ const Dashboard = () => {
             { label: 'Games Played',   value: stats.studentGamesPlayed,              icon: <TrendingUpIcon />,        accent: '#C8456D' },
             { label: 'Best WPM',       value: stats.studentWpm,                      icon: <BoltIcon />,              accent: '#FFC700' },
             { label: 'Accuracy',       value: `${stats.studentAccuracy}%`,           icon: <CenterFocusStrongIcon />, accent: '#E78AAC' },
-            { label: 'Total Lessons',  value: stats.studentTotalLessons,             icon: <MenuBookIcon />,          accent: '#9B2E54' },
+            { label: 'Total XP',       value: stats.studentXp.toLocaleString(),      icon: <StarIcon />,              accent: '#9B2E54' },
         ];
     }, [userRole, stats.totalStudents, stats.totalTeachers, stats.totalLessons, stats.averageWPM, stats.accuracy,
-        stats.studentGamesPlayed, stats.studentWpm, stats.studentAccuracy, stats.studentTotalLessons]);
+        stats.studentGamesPlayed, stats.studentWpm, stats.studentAccuracy, stats.studentXp]);
 
     const quickActions = useMemo(() => {
         const base = [

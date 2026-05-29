@@ -176,6 +176,7 @@ const FallingTypingTest = () => {
     const selectedChallengeRef = useRef(null);
 
     const modeRef = useRef(null);
+    const submitScoreRef = useRef(null);
 
     // Keep refs in sync with state used by endGame.
     useEffect(() => { scoreRef.current = score; }, [score]);
@@ -185,6 +186,9 @@ const FallingTypingTest = () => {
 
     const { submitScore, isSubmitting, submitMessage, submitSuccess, snackbarOpen, setSnackbarOpen } =
         useScoreSubmission();
+
+    // Must come after submitScore is declared.
+    useEffect(() => { submitScoreRef.current = submitScore; }, [submitScore]);
 
     // ─── Load challenge list ──────────────────────────────────────────────────
     useEffect(() => {
@@ -391,8 +395,19 @@ const FallingTypingTest = () => {
             });
         }
 
+        // Auto-submit to backend so XP, leaderboard, and badges are always awarded.
+        submitScoreRef.current?.("FALLING_WORDS", {
+            wpm: stats.wpm,
+            accuracy: stats.accuracy,
+            score: stats.score,
+            modeType: m,                                        // PRE_TEST / PRACTICE / POST_TEST / null
+            correctCount: stats.wordsCaught,                     // bugs/words cleared correctly
+            totalCount: stats.wordsCaught + wordsMissedRef.current, // items seen
+            errorCount: stats.wrongTyped + stats.linesMissed,    // wrong fixes + missed lines
+        });
+
         setFinalStats(stats);
-        setShowSubmitButton(true);
+        setShowSubmitButton(false);
         setView("gameover");
     }, []);
 
@@ -1482,6 +1497,15 @@ const FallingTypingTest = () => {
                             </Button>
                             <Button variant="text" color="primary" size="large" onClick={backToModePicker}>
                                 Change mode
+                            </Button>
+                            <Button
+                                variant="outlined"
+                                color="success"
+                                size="large"
+                                startIcon={<BoltIcon />}
+                                onClick={() => navigate("/my-stats")}
+                            >
+                                View My Stats
                             </Button>
                         </Stack>
                         {mode && mode !== MODE.PRACTICE && !canStartMode(GAME.FALLING, mode) && (
