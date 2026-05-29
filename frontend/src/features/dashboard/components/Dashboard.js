@@ -319,17 +319,25 @@ const Dashboard = () => {
                     <CardContent sx={{ p: { xs: 3, md: 4 } }}>
                         <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} alignItems={{ md: 'center' }} justifyContent="space-between">
                             <Box>
-                                <Chip
-                                    label={userRole}
+                                <Box
+                                    component="span"
                                     sx={{
+                                        display: 'inline-block',
+                                        px: 1.5,
+                                        py: 0.5,
+                                        mb: 1.5,
+                                        borderRadius: 999,
                                         bgcolor: 'rgba(200,69,109,0.12)',
                                         color: 'primary.main',
                                         fontWeight: 700,
+                                        fontSize: '0.75rem',
+                                        letterSpacing: '0.6px',
                                         border: '1.5px solid',
                                         borderColor: 'primary.main',
-                                        mb: 1.5,
                                     }}
-                                />
+                                >
+                                    {userRole}
+                                </Box>
                                 <Typography variant="h3" sx={{ color: 'text.primary', fontSize: { xs: '1.75rem', md: '2.5rem' } }}>
                                     Welcome back, <Box component="span" sx={gradientText}>{userName}</Box>
                                 </Typography>
