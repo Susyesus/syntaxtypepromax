@@ -77,6 +77,17 @@ export default function TranslationTerminal() {
     const enemy = enemies[enemyIdx];
     const bank = mode === MODE.PRACTICE ? practiceBank : testBank;
 
+    // Practice lets the student choose their opponent (difficulty). Pre-Test and
+    // Post-Test are standardized assessments — everyone faces the same sequence
+    // starting from the first enemy, so no difficulty selection is offered.
+    const proceedToPlay = (m) => {
+        if (m === MODE.PRACTICE) {
+            setView("picker");
+        } else {
+            startCombat(0);
+        }
+    };
+
     const onPickMode = (m) => {
         if (!canStartMode(GAME.TRANSLATION, m)) return;
         setMode(m);
@@ -87,13 +98,13 @@ export default function TranslationTerminal() {
                 return;
             }
         } catch {}
-        setView("picker");
+        proceedToPlay(m);
     };
 
     const finishTutorial = () => {
         try { localStorage.setItem(TUTORIAL_SEEN_KEY, "1"); } catch {}
         setTutorialStep(0);
-        setView("picker");
+        proceedToPlay(mode);
     };
 
     const openTutorial = () => {
@@ -170,23 +181,50 @@ export default function TranslationTerminal() {
         setTime(ROUND_SECONDS);
     };
 
+    // Auto-advance to the next enemy after a win so combat is continuous. Player
+    // HP carries over (no healing between enemies) — only the enemy is fresh.
+    // Prompt tallies and the `recorded` flag carry across the whole run, so the
+    // session is logged once — at the final victory or at defeat.
+    const advanceToNextEnemy = (idx) => {
+        const e = enemies[idx];
+        if (!e) return;
+        setEnemyIdx(idx);
+        setEnemyHp(e.hp);
+        setCombo(0);
+        setUsedIds((used) => {
+            const p = pickPromptForEnemy(bank, e, used);
+            setPrompt(p);
+            return [...used, p.id];
+        });
+        setAnswer("");
+        setTime(ROUND_SECONDS);
+        setView("combat");
+        setTimeout(() => inputRef.current?.focus(), 50);
+    };
+
     const onSubmit = () => {
         if (view !== "combat" || !prompt) return;
         if (tokensEqual(prompt.solution, answer)) {
             const newCombo = combo + 1;
             const multiplier = 1 + Math.floor(newCombo / 3);
             const dmg = prompt.damage * multiplier;
+            const killed = enemyHp - dmg <= 0;
             setCombo(newCombo);
             setFlash("hit");
             setTimeout(() => setFlash(null), 300);
             setPromptsAnswered((n) => n + 1);
             setPromptsCorrect((n) => n + 1);
-            setEnemyHp((prev) => {
-                const next = Math.max(0, prev - dmg);
-                if (next === 0) setView("victory");
-                return next;
-            });
-            nextPrompt();
+            if (killed) {
+                if (enemyIdx + 1 < enemies.length) {
+                    advanceToNextEnemy(enemyIdx + 1); // beat enemy → straight to the next
+                } else {
+                    setEnemyHp(0);
+                    setView("victory");               // cleared the final enemy
+                }
+            } else {
+                setEnemyHp(enemyHp - dmg);
+                nextPrompt();
+            }
         } else {
             onMiss(false);
         }
