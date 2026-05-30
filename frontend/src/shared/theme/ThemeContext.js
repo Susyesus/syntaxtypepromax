@@ -66,6 +66,17 @@ const buildTheme = (mode) =>
                     },
                 },
             },
+            // MUI v7.1.1 has a Chip regression: its root click handler calls the
+            // onClick prop unconditionally, so clicking a display-only Chip (no
+            // onClick) throws "onClick is not a function". Every Chip in this app
+            // is display-only, so default a no-op handler (prevents the throw)
+            // and clickable:false (keeps chips non-interactive — no ripple/cursor).
+            MuiChip: {
+                defaultProps: {
+                    clickable: false,
+                    onClick: () => {},
+                },
+            },
         },
     });
 

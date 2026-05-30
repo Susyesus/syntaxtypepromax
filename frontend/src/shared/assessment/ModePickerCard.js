@@ -5,7 +5,7 @@ import {
 import LockIcon from "@mui/icons-material/Lock";
 import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
 import {
-    MODE, MODE_META, attemptsRemaining, getAttempts, getHighLow, resetMode,
+    MODE, MODE_META, attemptsRemaining, getAttempts, getHighLow, resetMode, isModeLocked,
 } from "./modes";
 
 // Reusable Pre-Test / Practice / Post-Test picker. `game` is a stable string
@@ -27,9 +27,11 @@ export default function ModePickerCard({ game, onPick, title = "Choose your mode
                         const remaining = attemptsRemaining(game, m);
                         const attempts = getAttempts(game, m);
                         const stats = getHighLow(game, m);
-                        const blocked = remaining === 0;
-                        const limitText =
-                            meta.attemptLimit === Infinity
+                        const locked = isModeLocked(game, m); // Post-Test before Pre-Test
+                        const blocked = locked || remaining === 0;
+                        const limitText = locked
+                            ? "Take the Pre-Test first"
+                            : meta.attemptLimit === Infinity
                                 ? "Unlimited attempts"
                                 : `${remaining} / ${meta.attemptLimit} attempts left`;
                         return (
@@ -128,7 +130,7 @@ export default function ModePickerCard({ game, onPick, title = "Choose your mode
                                             "&:hover": { bgcolor: meta.color, opacity: 0.9 },
                                         }}
                                     >
-                                        {blocked ? "Limit reached" : "Start"}
+                                        {locked ? "Pre-Test required" : blocked ? "Limit reached" : "Start"}
                                     </Button>
 
                                     {attempts > 0 && meta.attemptLimit !== Infinity && (

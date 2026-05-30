@@ -104,7 +104,16 @@ export const attemptsRemaining = (game, mode) => {
     return Math.max(0, limit - getAttempts(game, mode));
 };
 
-export const canStartMode = (game, mode) => attemptsRemaining(game, mode) > 0;
+// True once the student has completed at least one Pre-Test for this game.
+export const isPreTestComplete = (game) => getAttempts(game, MODE.PRE_TEST) > 0;
+
+// The Post-Test is gated behind the Pre-Test: a student must establish a
+// baseline before they can be graded. Pre-Test and Practice are never locked.
+export const isModeLocked = (game, mode) =>
+    mode === MODE.POST_TEST && !isPreTestComplete(game);
+
+export const canStartMode = (game, mode) =>
+    !isModeLocked(game, mode) && attemptsRemaining(game, mode) > 0;
 
 export const getScores = (game, mode) => {
     const raw = safeRead(SCORES_KEY(game, mode), "[]");

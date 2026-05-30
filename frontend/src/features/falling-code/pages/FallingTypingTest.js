@@ -1492,9 +1492,13 @@ const FallingTypingTest = () => {
                             >
                                 Play Again
                             </Button>
-                            <Button variant="text" color="primary" size="large" onClick={handleBackToPicker}>
-                                Pick another
-                            </Button>
+                            {/* Choosing a different challenge (difficulty) is Practice-only;
+                                Pre/Post-Tests use a sealed, standardized challenge. */}
+                            {mode === MODE.PRACTICE && (
+                                <Button variant="text" color="primary" size="large" onClick={handleBackToPicker}>
+                                    Pick another
+                                </Button>
+                            )}
                             <Button variant="text" color="primary" size="large" onClick={backToModePicker}>
                                 Change mode
                             </Button>

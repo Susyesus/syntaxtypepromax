@@ -160,7 +160,7 @@ const Dashboard = () => {
             try {
                 const [statsRes, scoresRes, lessonsRes] = await Promise.all([
                     userId ? authFetch(`${API_BASE}/api/user-statistics/user?userId=${userId}`) : Promise.resolve(null),
-                    authFetch(`${API_BASE}/api/scores`),
+                    authFetch(`${API_BASE}/api/scores/me`), // only THIS user's scores, newest first
                     authFetch(`${API_BASE}/api/lessons`),
                 ]);
 
